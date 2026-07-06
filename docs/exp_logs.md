@@ -638,3 +638,32 @@ group3 결과:
 현재 판단:
 - 실제 LB에서 PINN-only 계열이 내부 검증보다 낮게 나왔던 점을 감안하면, 메인 `results/submission.csv`는 pure `all_meteo` tree로 유지.
 - PINN meteo blend는 후보로만 보관하고, 제출 여유가 있으면 5% blend부터 확인.
+
+### `evaluate_meteo_tree_pinn_blend.py` — meteo tree + meteo PINN blend weight sweep
+`all_meteo` tree와 `PINN meteo`를 같은 2024 holdout 시간축에서 직접 섞어 weight를 탐색했다. tree는 RF+LGBM+XGB + pooled isotonic, PINN은 group1 meteo cubic / group2 meteo p90 / group3 meteo 30% UNISON + 70% VESTAS p90.
+
+2024 holdout mean:
+
+| candidate | mean score |
+|---|---:|
+| tree meteo | 0.6045 |
+| PINN meteo | 0.6223 |
+| global 50% PINN + 50% tree | 0.6242 |
+| per-group best weights | 0.6270 |
+
+Per-group best weights:
+
+| group | PINN weight | score |
+|---|---:|---:|
+| group_1 | 0.55 | 0.6293 |
+| group_2 | 0.55 | 0.6551 |
+| group_3 | 0.70 | 0.5967 |
+
+생성한 강한 후보:
+- `results/submission_tree_meteo50_pinn_meteo50.csv`
+- `results/submission_tree_meteo_pinn_meteo_holdout_best.csv`
+
+해석:
+- 내부 2024 기준으로는 PINN weight를 꽤 크게 주는 쪽이 best.
+- 하지만 이전 실제 LB에서 PINN-only/공격적 blend가 내부 검증 대비 크게 떨어진 전례가 있어, `submission.csv`는 아직 pure `all_meteo` tree로 유지한다.
+- 제출 횟수 여유가 있으면 순서는 `pure all_meteo tree` → `tree95+pinn05` → `tree50+pinn50` 또는 `holdout_best`로 보는 것이 합리적.
