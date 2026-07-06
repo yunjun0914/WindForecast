@@ -179,6 +179,56 @@ v_std = 0.5*predicted scada_ws_std + 0.5*(predicted p90 - predicted p10)/2.563
 
 ## 앞으로의 계획
 
+### 데이터 중심 추가 개선 아이디어
+이번 세션의 가장 큰 결론은 모델 구조보다 **forecast field에서 실제 현장 상태를 얼마나 잘 복원하느냐**가 성능을 좌우한다는 점이다. PINN 자체, tree 자체보다 `SCADA teacher`, `group_2/VESTAS transfer`, `mixed teacher`, `group별 ensemble recipe`가 더 큰 개선을 만들었다. 현재 검증상 `0.6307`까지 왔고, 1등권(`0.6456`)과 목표 상단(`0.65~0.66`)을 노리려면 다음은 데이터 재구성 쪽이 핵심이다.
+
+후보 아이디어:
+
+1. **SCADA teacher 고도화**
+   - 현재 teacher는 RandomForest multi-output 하나로 `ws_mean/std/p10/p50/p90`을 예측한다.
+   - 다음은 RF/LGBM/XGB/ExtraTrees/CatBoost teacher ensemble, target별 모델 분리, group별 teacher weight 탐색을 시도.
+   - teacher target도 단순 풍속 통계뿐 아니라 `power-curve inverse wind`, `effective wind`, `ramp`, `gust-adjusted wind`, `turbulence proxy`로 확장.
+
+2. **group_3 VESTAS prior 정교화**
+   - group_3는 UNISON-only보다 VESTAS/group_2 신호를 섞을 때 좋아졌다.
+   - 현재는 `30% UNISON + 70% VESTAS group2 teacher`와 group2 tree transfer가 강함.
+   - 다음은 시간대/풍속구간/계절별로 VESTAS prior weight를 다르게 주는 adaptive teacher mixing.
+   - 예: low wind에서는 UNISON teacher, rated 근처에서는 VESTAS/group2 teacher를 더 신뢰하는 piecewise mixing.
+
+3. **공간정보/격자 선택 재검토**
+   - LDAPS 16격자 평균, GFS nearest grid만 쓰는 방식은 terrain speed-up을 충분히 표현 못 할 수 있음.
+   - 격자별 풍속을 평균/최대/상위분위수/풍상방향 weighted average로 재구성.
+   - 풍향을 단순 제거하지 말고, ridge orientation 또는 grid upwind/downwind relation과 결합해 terrain-aware feature로 재도입.
+
+4. **lead-time / forecast issue-time bias**
+   - 동일한 forecast_kst_dtm이라도 예보 생성 시점과 lead time에 따라 bias가 다를 수 있음.
+   - LDAPS/GFS 원본에 issue time 또는 forecast lead 정보가 있으면 lead별 bias correction/teacher feature를 추가.
+   - 특히 FICR은 피크 시간대 오차에 민감하므로 ramp 구간 lead-time bias가 중요할 가능성.
+
+5. **SCADA 품질/가동상태 필터링**
+   - SCADA teacher target을 만들 때 정지/curtailment/센서 이상치를 더 강하게 제거하면 teacher가 발전가능 wind를 더 잘 배울 수 있음.
+   - 풍속은 높은데 발전량이 낮은 curtailment-like 구간, turbine별 outlier, missing turbine count를 feature/weight로 반영.
+
+6. **시간 alignment 재검토**
+   - SCADA는 10분 단위, labels/weather는 시간 단위라 집계 방식이 중요하다.
+   - 현재 hourly mean 중심인데, 발전량은 `v^3` 비선형이라 mean wind보다 `E[v^3]` 또는 상위분위 풍속이 더 맞을 수 있음.
+   - 정각 기준 window를 `[-50,0]`, `[0,+50]`, centered 등으로 바꿔 teacher target을 만들어 비교.
+
+7. **label noise / group transfer 활용**
+   - group_2 모델이 group_1/group_3에도 잘 먹힌 것은 일부 group label에 설명 안 되는 noise가 있음을 시사.
+   - group별 label을 독립 target으로만 보지 말고, capacity-normalized shared latent power index를 만들고 각 group을 보정하는 구조를 시도.
+   - tree/PINN 모두 `site common power index + group residual` 형태로 재구성 가능.
+
+8. **validation split 다변화**
+   - 현재는 2024 단일 holdout에 최적화되어 있다.
+   - 가능한 범위에서 rolling yearly/monthly holdout, 고풍속 이벤트 holdout, 계절별 holdout을 추가해 데이터 recipe가 특정 2024 패턴만 외우는지 확인.
+
+우선순위:
+1. SCADA teacher ensemble/target 확장
+2. group_3 adaptive VESTAS prior
+3. 격자 선택/terrain-aware wind reconstruction
+4. SCADA quality filtering과 hourly aggregation 재검토
+
 ### 트리 앙상블에도 SCADA teacher 붙이기
 현재 RF/LGBM/XGB 메인 제출 파이프라인은 SCADA를 직접 쓰지 않고, forecast weather + SCADA power curve feature 정도만 사용한다. PINN 실험에서 확인된 가장 큰 이득은 `forecast → site SCADA wind distribution` teacher였으므로, 이 신호를 트리 앙상블에도 넣는 실험이 필요하다.
 
@@ -229,3 +279,118 @@ Pooled isotonic까지 붙인 결과:
 - 그러나 LGBM/XGB와 all3 단순 앙상블에는 아직 이득이 뚜렷하지 않음. 기존 all3 baseline 평균(약 0.5978)보다 낮거나 비슷.
 - PINN에서는 teacher가 직접 물리 입력(`v/v_std`)이 되므로 큰 효과가 났지만, 트리 모델은 이미 원 forecast 피처와 power curve feature를 비선형으로 활용하고 있어 teacher 피처가 중복/노이즈로 작용할 수 있음.
 - 다음 시도는 단순 feature 추가보다, RF-only teacher 모델 활용, 모델별 feature selection, 또는 teacher feature를 calibration/stacking 단계에 쓰는 방향이 더 적합해 보임.
+
+### `evaluate_pinn_tree_blend.py` — 최고 PINN + 기존 트리 앙상블 블렌드
+현재 최고 PINN(SCADA teacher honest, HOD bias)과 기존 RF+LGBM+XGB 트리 앙상블을 2024 time-holdout에서 단순 가중평균으로 블렌드. 트리 쪽은 raw ensemble과 pooled isotonic calibrated ensemble을 둘 다 비교.
+
+기준점:
+
+| 모델 | 평균 점수 |
+|---|---:|
+| RF+LGBM+XGB raw | 0.5978 |
+| RF+LGBM+XGB pooled isotonic | 0.6021 |
+| PINN 단독 | 0.6189 |
+
+블렌드 최고:
+
+| tree variant | PINN weight | group_1 | group_2 | group_3 | 평균 |
+|---|---:|---:|---:|---:|---:|
+| pooled isotonic | 0.70 | 0.6357 | 0.6517 | 0.5862 | 0.6245 |
+
+해석:
+- 트리 단독보다 PINN이 확실히 강하지만, 두 모델의 오차가 완전히 같지는 않아 단순 평균만으로도 `0.6189 → 0.6245` 개선.
+- 최적 weight가 PINN 70%, tree 30% 근처라 PINN을 메인 예측기로 두고 트리를 residual stabilizer처럼 쓰는 구조가 적합해 보임.
+- 특히 group_2가 `0.6339 → 0.6517`로 크게 좋아져서, PINN의 물리/SCADA teacher 신호와 트리의 경험적 보정 신호가 잘 섞이는 케이스로 판단.
+- 다음 단계는 제출용 `predict.py`에 PINN checkpoint prediction + calibrated tree prediction을 같은 weight로 결합하는 별도 submission path를 만드는 것.
+
+### `evaluate_group3_transfer_blend.py` — group_3 전용 VESTAS/group_2 transfer 블렌드
+이전 실험에서 group_3 own tree보다 group_2(VESTAS) 기반 transfer가 더 좋았던 기억을 다시 검증. group_3만 별도 후보군을 만들고, 현재 최고 UNISON PINN과 섞어서 weight를 탐색.
+
+단독 후보:
+
+| candidate | group_3 score | nmae | ficr |
+|---|---:|---:|---:|
+| UNISON PINN | 0.5886 | 0.1470 | 0.3243 |
+| VESTAS PINN group_2 same-time proxy | 0.5828 | 0.1642 | 0.3299 |
+| group_2 tree transfer on group_3 features | 0.5804 | 0.1440 | 0.3048 |
+| group_2 tree same-time proxy | 0.5792 | 0.1452 | 0.3036 |
+| group_3 own tree raw | 0.5587 | 0.1496 | 0.2669 |
+| VESTAS backbone on group_3 weather | 0.5501 | 0.1488 | 0.2490 |
+
+블렌드 최고:
+
+| group_3 recipe | PINN weight | group_3 score | nmae | ficr |
+|---|---:|---:|---:|---:|
+| UNISON PINN + group_2 tree same-time proxy | 0.60 | 0.5994 | 0.1386 | 0.3373 |
+| UNISON PINN + group_2 tree transfer on group_3 features | 0.65 | 0.5993 | 0.1389 | 0.3375 |
+| UNISON PINN + VESTAS PINN group_2 same-time proxy | 0.60 | 0.5965 | 0.1488 | 0.3417 |
+
+해석:
+- group_3 own tree는 PINN에 섞으면 도움이 안 되고, 최적 weight가 PINN 1.0으로 돌아감.
+- 반대로 group_2/VESTAS 기반 proxy는 단독으로 UNISON PINN보다 약하지만, 오차 구조가 달라서 섞으면 `0.5886 → 0.5994`로 상승.
+- 이전 best group_1/group_2(`0.6357`, `0.6517`)를 유지하고 group_3만 이 조합으로 교체하면 평균은 약 `0.6289`.
+- 현재 가장 강한 검증 조합은 group별 recipe를 다르게 쓰는 방향:
+  - group_1/group_2: `PINN 0.70 + calibrated tree 0.30`
+  - group_3: `UNISON PINN 0.60 + group_2 tree same-time proxy 0.40`
+
+### `evaluate_group3_pinn_teacher_transfer.py` — group_3 PINN teacher 자체를 VESTAS/mixed로 교체
+후단 proxy뿐 아니라, group_3 PINN 입력 teacher 자체도 UNISON 고정이 맞는지 확인. 기존 checkpoint는 덮어쓰지 않고, group_3 single-group PINN을 teacher recipe별로 새로 학습(`save=False`)해서 2024 holdout 비교.
+
+단독 PINN 결과:
+
+| physical backbone | teacher | group_3 score | nmae | ficr |
+|---|---|---:|---:|---:|
+| UNISON | 30% UNISON g3 + 70% VESTAS g2 teacher | 0.5961 | 0.1431 | 0.3353 |
+| UNISON | VESTAS group1/group2 avg teacher | 0.5953 | 0.1413 | 0.3320 |
+| VESTAS | VESTAS group1/group2 avg teacher | 0.5949 | 0.1423 | 0.3320 |
+| UNISON | VESTAS group2 teacher | 0.5933 | 0.1430 | 0.3295 |
+| UNISON | UNISON group3 teacher | 0.5880 | 0.1471 | 0.3231 |
+
+추가로 teacher-transfer PINN과 group_2 tree proxy를 다시 블렌드:
+
+| group_3 recipe | PINN weight | group_3 score | nmae | ficr |
+|---|---:|---:|---:|---:|
+| UNISON PINN(30% UNISON g3 + 70% VESTAS g2 teacher) + group_2 tree transfer on group_3 features | 0.70 | 0.6024 | 0.1382 | 0.3430 |
+| UNISON PINN(30% UNISON g3 + 70% VESTAS g2 teacher) + group_2 tree same-time proxy | 0.70 | 0.6022 | 0.1385 | 0.3428 |
+| UNISON PINN(VESTAS g2 teacher) + group_2 tree transfer on group_3 features | 0.70 | 0.6019 | 0.1382 | 0.3420 |
+| VESTAS PINN(VESTAS g1/g2 avg teacher) + group_2 tree transfer on group_3 features | 0.70 | 0.6018 | 0.1377 | 0.3412 |
+
+해석:
+- group_3 PINN 자체도 UNISON teacher만 쓰는 것보다 VESTAS/group2 teacher를 많이 섞는 쪽이 더 좋음.
+- 물리 backbone은 VESTAS로 완전히 바꾸는 것보다 UNISON backbone을 유지하고 teacher만 VESTAS 쪽으로 당기는 구성이 가장 좋음.
+- group_2 tree transfer를 후단에 다시 섞으면 group_3가 `0.5994 → 0.6024`로 추가 상승.
+- 이전 best group_1/group_2(`0.6357`, `0.6517`)를 유지하면 평균은 약 `0.6299`.
+- 현재 최고 검증 recipe:
+  - group_1/group_2: `PINN 0.70 + calibrated tree 0.30`
+  - group_3: `UNISON-physics PINN(mixed teacher) 0.70 + group_2 tree transfer 0.30`
+
+### `evaluate_final_tree_ensemble.py` — 현재 최고 recipe에 tree계열 추가 앙상블
+현재 최고 recipe를 anchor로 두고, 여기에 tree계열 예측을 한 번 더 섞었을 때 개선되는지 확인.
+
+기준 anchor:
+- group_1/group_2: `PINN 0.70 + calibrated tree 0.30`
+- group_3: `UNISON-physics PINN(mixed teacher) 0.70 + group_2 tree transfer 0.30`
+
+결과:
+
+| experiment | group_1 | group_2 | group_3 | 평균 |
+|---|---:|---:|---:|---:|
+| anchor | 0.6357 | 0.6517 | 0.6024 | 0.6299 |
+| 공통 global extra raw/calibrated tree | - | - | - | 0.6299 이하 |
+| group_2만 raw tree 15% 추가 | 0.6357 | 0.6530 | 0.6024 | 0.6304 |
+| group_3만 own calibrated tree 10% 추가 | 0.6357 | 0.6517 | 0.6034 | 0.6303 |
+| group_2 raw tree 15% + group_3 own calibrated tree 10% | 0.6357 | 0.6530 | 0.6034 | 0.6307 |
+
+최종 후보 recipe:
+
+```text
+group_1 = 0.70 * PINN + 0.30 * calibrated tree
+group_2 = 0.85 * (0.70 * PINN + 0.30 * calibrated tree) + 0.15 * raw tree
+group_3 = 0.90 * (0.70 * mixed-teacher PINN + 0.30 * group2-transfer tree)
+        + 0.10 * own calibrated tree
+```
+
+해석:
+- tree를 모든 group에 공통 weight로 더 섞는 것은 group_1 손해 때문에 평균 개선이 없음.
+- 다만 group_2와 group_3는 현재 recipe 이후에도 tree residual이 조금 남아 있어, group별 소량 추가 앙상블이 이득.
+- 개선폭은 작지만 목표였던 `0.63`선을 검증상 넘김(`0.6307`).
