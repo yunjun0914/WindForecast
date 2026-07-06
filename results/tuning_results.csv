@@ -1,0 +1,10 @@
+﻿group,model,default_cv_score,tuned_cv_score,best_params,seconds
+kpx_group_1,random_forest,0.6674936763293265,0.659489117588965,"{'n_estimators': 100, 'min_samples_leaf': 2, 'max_features': 1.0, 'max_depth': 15}",196.9
+kpx_group_1,lgbm,0.6466855365632508,0.6930989867261017,"{'subsample': 0.8, 'num_leaves': 63, 'n_estimators': 300, 'min_child_samples': 20, 'max_depth': 15, 'learning_rate': 0.1, 'colsample_bytree': 0.8}",13.6
+kpx_group_1,xgb,0.6671910530636492,0.694644933089798,"{'subsample': 0.8, 'n_estimators': 500, 'min_child_weight': 10, 'max_depth': 7, 'learning_rate': 0.1, 'colsample_bytree': 0.8}",47.7
+kpx_group_2,random_forest,0.6706142533783156,0.6619756612412641,"{'n_estimators': 100, 'min_samples_leaf': 2, 'max_features': 1.0, 'max_depth': 15}",191.8
+kpx_group_2,lgbm,0.6534825032515924,0.700934354296748,"{'subsample': 0.6, 'num_leaves': 127, 'n_estimators': 300, 'min_child_samples': 20, 'max_depth': -1, 'learning_rate': 0.2, 'colsample_bytree': 0.6}",15.3
+kpx_group_2,xgb,0.6737419034311992,0.6996240293854789,"{'subsample': 0.8, 'n_estimators': 500, 'min_child_weight': 10, 'max_depth': 7, 'learning_rate': 0.1, 'colsample_bytree': 0.8}",53.3
+kpx_group_3,random_forest,0.6185830468148837,0.6112879575100488,"{'n_estimators': 100, 'min_samples_leaf': 1, 'max_features': 1.0, 'max_depth': 15}",127.3
+kpx_group_3,lgbm,0.6122743994940855,0.6515913106774726,"{'subsample': 0.8, 'num_leaves': 63, 'n_estimators': 300, 'min_child_samples': 20, 'max_depth': 15, 'learning_rate': 0.1, 'colsample_bytree': 0.8}",12.1
+kpx_group_3,xgb,0.6286038043312397,0.652083903316533,"{'subsample': 0.8, 'n_estimators': 500, 'min_child_weight': 10, 'max_depth': 7, 'learning_rate': 0.1, 'colsample_bytree': 0.8}",42.6
