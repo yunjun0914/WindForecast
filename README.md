@@ -67,16 +67,40 @@ SCADA(풍속-발전량) → 그룹별 경험적 파워커브 피처 ────
                                                 results/submission.csv
 ```
 
+## 데이터 준비 (필수)
+
+`data/` 폴더는 용량 문제(LDAPS/GFS 파일이 GitHub 100MB 제한 초과)로 **git에 포함되어 있지 않습니다**. 아래 구조에 맞게 원본 데이터를 직접 받아서 채워넣어야 스크립트가 동작합니다.
+
+```
+data/
+├── data_description.md
+├── info.xlsx
+├── sample_submission.csv
+├── train/
+│   ├── ldaps_train.csv
+│   ├── gfs_train.csv
+│   ├── train_labels.csv
+│   ├── scada_vestas_train.csv
+│   └── scada_unison_train.csv
+└── test/
+    ├── ldaps_test.csv
+    └── gfs_test.csv
+```
+
+컬럼 설명은 [docs/데이터 변수 구조.md](docs/데이터 변수 구조.md) 참고. `models/artifacts/`(학습된 모델 .pkl)도 같은 이유로 git에 없으며, `train.py`/`predict.py`를 실행하면 자동으로 생성됩니다.
+
 ## 실행 방법
 
 ```bash
 # 1. conda 환경 생성 (최초 1회)
 conda env create -f environment.yml
 
-# 2. 그룹×모델 검증 (선택, 실험용)
+# 2. data/ 폴더에 원본 데이터 채워넣기 (위 "데이터 준비" 참고)
+
+# 3. 그룹×모델 검증 (선택, 실험용)
 conda run -n WindForecast python train.py
 
-# 3. 최종 제출 파일 생성
+# 4. 최종 제출 파일 생성
 conda run -n WindForecast python predict.py
 ```
 
