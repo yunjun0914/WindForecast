@@ -197,3 +197,35 @@ v_std = 0.5*predicted scada_ws_std + 0.5*(predicted p90 - predicted p10)/2.563
 기대 효과:
 - 트리 모델은 이미 0.60대 성능을 갖고 있으므로, SCADA teacher 피처가 들어가면 PINN에서 확인한 site wind reconstruction 이득을 더 직접적으로 흡수할 가능성이 큼.
 - 특히 group_3은 PINN teacher honest에서도 아직 0.5886으로 낮으므로, 트리 모델 + SCADA teacher + 기존 isotonic 보정 조합이 다음 주요 상승 후보.
+
+### `evaluate_scada_teacher_time_holdout.py`, `calibrate_scada_teacher_time_holdout.py` — 트리 모델에 SCADA teacher 피처 추가
+PINN에서 큰 효과를 낸 SCADA teacher wind distribution을 RF/LGBM/XGB 입력 피처로 추가. Honest setup으로 teacher는 2024 이전 SCADA만 보고 fit하고, 2024 검증에는 예측된 teacher 피처만 사용.
+
+추가 피처:
+- `pred_scada_ws_mean/std/p10/p50/p90`
+- `pred_scada_ws_iqr`
+- `pred_scada_ws_sigma_q`
+- `pred_scada_ws_mean_minus_gfs100`
+- `pred_scada_ws_mean_minus_gfs850`
+
+Raw time-holdout 결과:
+
+| 모델 | group_1 | group_2 | group_3 | 평균 |
+|---|---:|---:|---:|---:|
+| RF + teacher | 0.5991 | 0.6368 | 0.5611 | 0.5990 |
+| LGBM + teacher | 0.6005 | 0.6214 | 0.5571 | 0.5930 |
+| XGB + teacher | 0.5962 | 0.6192 | 0.5520 | 0.5891 |
+| all3 ensemble + teacher | 0.6006 | 0.6282 | 0.5585 | 0.5958 |
+
+Pooled isotonic까지 붙인 결과:
+
+| 모델셋 | raw 평균 | pooled isotonic 평균 |
+|---|---:|---:|
+| RF-only + teacher | 0.5990 | 0.5986 |
+| all3 + teacher | 0.5958 | 0.5967 |
+
+해석:
+- SCADA teacher 피처는 RF 단독에는 기존 RF time-holdout 평균(약 0.5925) 대비 개선.
+- 그러나 LGBM/XGB와 all3 단순 앙상블에는 아직 이득이 뚜렷하지 않음. 기존 all3 baseline 평균(약 0.5978)보다 낮거나 비슷.
+- PINN에서는 teacher가 직접 물리 입력(`v/v_std`)이 되므로 큰 효과가 났지만, 트리 모델은 이미 원 forecast 피처와 power curve feature를 비선형으로 활용하고 있어 teacher 피처가 중복/노이즈로 작용할 수 있음.
+- 다음 시도는 단순 feature 추가보다, RF-only teacher 모델 활용, 모델별 feature selection, 또는 teacher feature를 calibration/stacking 단계에 쓰는 방향이 더 적합해 보임.
