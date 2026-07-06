@@ -667,3 +667,24 @@ Per-group best weights:
 - 내부 2024 기준으로는 PINN weight를 꽤 크게 주는 쪽이 best.
 - 하지만 이전 실제 LB에서 PINN-only/공격적 blend가 내부 검증 대비 크게 떨어진 전례가 있어, `submission.csv`는 아직 pure `all_meteo` tree로 유지한다.
 - 제출 횟수 여유가 있으면 순서는 `pure all_meteo tree` → `tree95+pinn05` → `tree50+pinn50` 또는 `holdout_best`로 보는 것이 합리적.
+
+### `evaluate_meteo_tree_pinn_multi_year_blend.py` — meteo tree/PINN blend 다년 검증
+위 blend sweep이 2024에만 맞은 것인지 확인하기 위해 2023/2024 yearly fold로 다시 평가했다. 2023은 group3 train label이 부족하므로 group1/2만 평균에 들어간다.
+
+결과:
+
+| candidate | 2023 | 2024 | mean | worst |
+|---|---:|---:|---:|---:|
+| pure meteo tree | 0.5822 | 0.6045 | 0.5933 | 0.5822 |
+| global PINN 50% | 0.6022 | 0.6255 | 0.6139 | 0.6022 |
+| 2024 holdout-best weights | 0.6034 | 0.6283 | 0.6158 | 0.6034 |
+| pure PINN meteo | 0.6102 | 0.6254 | 0.6178 | 0.6102 |
+
+해석:
+- 다년 내부 검증에서는 `PINN meteo`가 평균/worst 모두 가장 좋다.
+- 2024에서 최적이던 group별 holdout-best weight는 2023 worst가 PINN 단독보다 낮아, 다년 안정성은 PINN 단독 쪽이 더 낫다.
+- 다만 실제 LB 피드백에서 PINN-only 계열이 내부 검증보다 낮게 나온 적이 있으므로, 운영상 메인 제출 파일은 아직 `all_meteo tree`로 유지하되, 새 후보 우선순위는 조정:
+  1. `results/submission.csv` (`all_meteo tree`, 안전 anchor)
+  2. `results/submission_pinn_meteo.csv` (multi-year 내부 best)
+  3. `results/submission_tree_meteo50_pinn_meteo50.csv`
+  4. `results/submission_tree_meteo_pinn_meteo_holdout_best.csv`
