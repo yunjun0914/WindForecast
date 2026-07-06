@@ -574,3 +574,67 @@ PINN에서 먹힌 effective wind teacher와 grid distribution을 tree feature로
 - NMAE도 좋아지고(`0.1351 -> 0.1326`), FICR도 좋아짐(`0.3392 -> 0.3484`)이라 단순 평균 오차만 줄인 것이 아님.
 - 현재 `results/submission.csv`는 이 `all_meteo` tree 후보로 갱신.
 - 백업 후보로 effective PINN을 소량 섞은 `submission_tree_meteo95_effective05.csv`, `submission_tree_meteo90_effective10.csv`도 생성.
+
+### `evaluate_tree_meteo_multi_year.py` — meteo tree 다년 일반화 확인
+`all_meteo` 개선이 2024 단일 holdout 착시인지 확인하려고 2023/2024 yearly와 2024 quarter split에서 기존 tree baseline과 다시 비교했다. 구조는 제출식과 맞춘 RF+LGBM+XGB + pooled isotonic.
+
+결과:
+
+| fold type | baseline pooled | `all_meteo` pooled | gain |
+|---|---:|---:|---:|
+| yearly mean(2023, 2024) | 0.5881 | 0.5933 | +0.0053 |
+| yearly worst | 0.5755 | 0.5822 | +0.0067 |
+| quarter mean(2024) | 0.5992 | 0.6051 | +0.0059 |
+| quarter worst | 0.5874 | 0.5877 | +0.0003 |
+
+해석:
+- 2023/2024 양쪽 yearly에서 모두 개선되고, quarter 평균도 개선되어 `all_meteo`는 제출 후보로 유지할 근거가 충분함.
+- 다만 worst quarter 개선은 작아서, 실제 LB에는 pure meteo tree를 우선 제출하고 PINN blend는 작은 weight 후보로만 보는 전략이 안전.
+
+### `evaluate_scada_teacher_meteo_targets.py`, `evaluate_pinn_meteo_wind_teacher.py` — meteo feature를 PINN teacher에 추가
+tree에서 meteo feature가 먹혔으므로, SCADA wind teacher에도 같은 non-wind meteo feature를 붙였다. 먼저 SCADA target R2를 확인하고, 이후 PINN holdout까지 연결했다.
+
+SCADA teacher mean R2:
+
+| fold | target | extended | extended + meteo |
+|---|---|---:|---:|
+| 2023 | mean | 0.7682 | 0.7719 |
+| 2023 | cubic | 0.7775 | 0.7792 |
+| 2023 | p90 | 0.7857 | 0.7880 |
+| 2024 | mean | 0.8093 | 0.8135 |
+| 2024 | cubic | 0.8148 | 0.8193 |
+| 2024 | p90 | 0.8194 | 0.8238 |
+
+PINN 2024 holdout:
+
+| variant | group_1 | group_2 | group_3 | 평균 |
+|---|---:|---:|---:|---:|
+| meteo cubic | 0.6268 | 0.6363 | 0.5971 | 0.6201 |
+| meteo p90 | 0.6165 | 0.6448 | 0.5958 | 0.6190 |
+| meteo 50% cubic + 50% p90 | 0.6237 | 0.6434 | 0.5942 | 0.6205 |
+
+해석:
+- meteo는 SCADA teacher target 예측 R2를 일관되게 올림.
+- PINN 전체 평균 개선은 작지만, group_3가 기존 effective teacher보다 좋아지는 쪽이 의미 있음.
+- group_1은 기존 non-meteo cubic effective가 더 좋았던 구간도 있어, meteo PINN 단독을 메인 제출로 쓰기보다는 tree 보조 후보로 유지.
+
+### `evaluate_group3_meteo_teacher_mix.py`, `predict_pinn_meteo_only.py` — group3 meteo teacher + VESTAS prior
+group3는 계속 VESTAS/group2 prior를 섞을 때 좋아졌으므로, meteo teacher에서도 같은 구조를 검증했다.
+
+group3 결과:
+
+| variant | group_3 score |
+|---|---:|
+| meteo UNISON cubic | 0.5968 |
+| meteo 30% UNISON + 70% VESTAS cubic | 0.6007 |
+| meteo 50% UNISON + 50% VESTAS cubic | 0.5996 |
+| meteo 30% UNISON + 70% VESTAS p90 | 0.6015 |
+
+제출 후보:
+- `results/submission_pinn_meteo.csv`: group1 meteo cubic, group2 meteo p90, group3 meteo 30% UNISON + 70% VESTAS p90
+- `results/submission_tree_meteo95_pinn_meteo05.csv`
+- `results/submission_tree_meteo90_pinn_meteo10.csv`
+
+현재 판단:
+- 실제 LB에서 PINN-only 계열이 내부 검증보다 낮게 나왔던 점을 감안하면, 메인 `results/submission.csv`는 pure `all_meteo` tree로 유지.
+- PINN meteo blend는 후보로만 보관하고, 제출 여유가 있으면 5% blend부터 확인.
