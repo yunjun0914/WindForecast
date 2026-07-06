@@ -518,3 +518,59 @@ PINN에서 먹힌 effective wind teacher와 grid distribution을 tree feature로
 - effective teacher/grid feature는 일부 group/model에서는 개선되지만, 기존 tree baseline/pooled calibration을 확실히 넘지는 못함.
 - 특히 group_3는 여전히 약하고, tree는 feature 추가보다 보정/앙상블이 더 중요해 보임.
 - effective wind는 tree 직접 feature보다는 PINN 입력 또는 tree/PINN 소량 blend로 쓰는 쪽이 더 타당.
+
+### `evaluate_tree_feature_blocks_fast.py`, `predict_tree_feature_block.py` — raw wind grid/lead block 재검토
+기존 tree feature는 LDAPS 평균, GFS nearest grid 중심이라 원천 예보장의 공간분포/lead-time 정보가 사라진다. 그래서 PINN teacher에서 쓰던 확장 feature 중 일부를 tree에도 직접 붙여봄.
+
+후보 block:
+- `lead`: forecast lead hour
+- `ldaps`: LDAPS wind grid mean/std/min/max/p75
+- `gfs`: GFS wind grid mean/std/min/max/p75
+- `lead_ldaps_gfs`: 위 전체
+
+빠른 LGBM-only 결과:
+
+| fold type | baseline | best block | best score |
+|---|---:|---|---:|
+| 2024 yearly | 0.5953 | `lead_ldaps_gfs` | 0.5976 |
+| 2024 quarter mean | 0.5928 | `lead_ldaps_gfs` | 0.5964 |
+
+하지만 제출 구조와 같은 RF+LGBM+XGB + pooled isotonic으로 다시 검증하면:
+
+| feature block | raw | pooled isotonic |
+|---|---:|---:|
+| baseline | 0.5978 | 0.6021 |
+| `lead_ldaps_gfs` | 0.5961 | 0.6009 |
+
+해석:
+- raw grid/lead 정보는 LGBM 단독에는 도움이 되지만, RF/XGB까지 포함한 현재 all3 ensemble에서는 noise/중복 신호가 더 커짐.
+- 후보 제출 파일은 생성했지만(`submission_tree_feature_block.csv`, `submission_tree75_feature25.csv`, `submission_tree50_feature50.csv`), 메인으로 승격하지 않음.
+
+### `evaluate_tree_meteo_feature_blocks_fast.py`, `evaluate_tree_meteo_submission_style.py`, `predict_tree_meteo.py` — 비바람 meteo feature 추가
+기존 tree pipeline은 wind feature 위주였는데, 2025 drift를 생각하면 공기밀도/기압/온습도/경계층/복사/구름/강수 같은 기상 상태가 발전량과 forecast bias에 영향을 줄 수 있다. LDAPS는 16격자 평균, GFS는 farm nearest grid를 사용해 non-wind meteo feature block을 만들었다.
+
+후보 block:
+- `thermo`: 온도, 이슬점/습도, 비습, 지상기압, 해면기압, 상층 온도/습도, BLH
+- `radiation_cloud`: 단파/장파 복사, 구름량, 강수/적설
+- `all_meteo`: wind raw를 제외한 meteo 전체
+- `lead_all_meteo`: `all_meteo` + lead hour
+
+빠른 LGBM-only 결과:
+
+| fold type | baseline | `all_meteo` | gain |
+|---|---:|---:|---:|
+| 2024 yearly | 0.5953 | 0.6033 | +0.0080 |
+| 2024 quarter mean | 0.5928 | 0.6014 | +0.0086 |
+
+제출 구조와 같은 RF+LGBM+XGB + pooled isotonic 결과:
+
+| feature block | raw | pooled isotonic |
+|---|---:|---:|
+| baseline | 0.5978 | 0.6021 |
+| `all_meteo` | 0.5997 | 0.6079 |
+
+해석:
+- 이번에는 all3 ensemble과 pooled isotonic에서도 개선이 유지됨.
+- NMAE도 좋아지고(`0.1351 -> 0.1326`), FICR도 좋아짐(`0.3392 -> 0.3484`)이라 단순 평균 오차만 줄인 것이 아님.
+- 현재 `results/submission.csv`는 이 `all_meteo` tree 후보로 갱신.
+- 백업 후보로 effective PINN을 소량 섞은 `submission_tree_meteo95_effective05.csv`, `submission_tree_meteo90_effective10.csv`도 생성.
