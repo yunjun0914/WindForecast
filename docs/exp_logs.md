@@ -394,3 +394,102 @@ group_3 = 0.90 * (0.70 * mixed-teacher PINN + 0.30 * group2-transfer tree)
 - tree를 모든 group에 공통 weight로 더 섞는 것은 group_1 손해 때문에 평균 개선이 없음.
 - 다만 group_2와 group_3는 현재 recipe 이후에도 tree residual이 조금 남아 있어, group별 소량 추가 앙상블이 이득.
 - 개선폭은 작지만 목표였던 `0.63`선을 검증상 넘김(`0.6307`).
+
+### `evaluate_multi_year_generalization.py` — 2024 단일 holdout 과적합 점검
+LB에서 final aggressive ensemble이 기대보다 낮고, PINN-only도 `0.6038`에 그치면서 2024 단일 holdout에 과적합됐을 가능성이 커짐. 그래서 2023/2024 yearly holdout과 2024 quarter block holdout을 추가해 검증판을 넓힘.
+
+검증 구성:
+- `year_2023`: 2022 train → 2023 validation. group_1/2만 평가(group_3은 2022 label 부족).
+- `year_2024`: 2022~2023 train → 2024 validation. group_1/2/3 평가.
+- `q2024_1~4`: quarter별 tree-only block validation. train은 각 quarter 이전 기간.
+
+Yearly mean 결과:
+
+| candidate | mean | worst fold | best fold |
+|---|---:|---:|---:|
+| PINN mixed group_3 teacher | 0.6136 | 0.6058 | 0.6214 |
+| PINN standard | 0.6125 | 0.6058 | 0.6192 |
+| calibrated tree + PINN 50% | 0.6112 | 0.5973 | 0.6251 |
+| calibrated tree + PINN 30% | 0.6027 | 0.5886 | 0.6168 |
+| tree calibrated | 0.5881 | 0.5755 | 0.6006 |
+| tree raw | 0.5847 | 0.5726 | 0.5969 |
+
+Yearly group breakdown:
+
+| fold | group | tree calibrated | PINN standard | PINN mixed | tree+PINN 50% |
+|---|---|---:|---:|---:|---:|
+| 2023 | group_1 | 0.5475 | 0.5858 | 0.5858 | 0.5733 |
+| 2023 | group_2 | 0.6036 | 0.6259 | 0.6259 | 0.6213 |
+| 2024 | group_1 | 0.6105 | 0.6333 | 0.6333 | 0.6310 |
+| 2024 | group_2 | 0.6371 | 0.6369 | 0.6369 | 0.6539 |
+| 2024 | group_3 | 0.5542 | 0.5875 | 0.5942 | 0.5903 |
+
+2024 quarter tree-only:
+
+| candidate | mean | worst quarter | best quarter |
+|---|---:|---:|---:|
+| tree calibrated | 0.5992 | 0.5874 | 0.6164 |
+| tree raw | 0.5957 | 0.5728 | 0.6135 |
+
+해석:
+- train 내부 multi-year 기준으로는 PINN이 tree보다 훨씬 강하고, 2023/2024 모두 방향은 일관됨.
+- 하지만 실제 2025 LB에서 PINN-only가 `0.6038`이므로, 2022~2024 내부 검증만으로도 2025 drift를 완전히 잡지는 못함.
+- 즉 문제는 단순히 "2024만 봐서"뿐 아니라, **2025 forecast/site relationship 자체가 2022~2024와 다르게 움직이는 drift**도 있는 것으로 보임.
+- 다음 선택 기준은 2024 최고점이 아니라 `multi-year 평균`, `worst fold`, 실제 LB feedback을 함께 보는 쪽이어야 함.
+- 당장 제출 후보는 aggressive recipe보다 보수적인 `tree baseline`, `PINN-only`, `tree/PINN 50% 내외`를 LB로 직접 비교하며 anchor를 다시 잡는 방향.
+
+### `evaluate_scada_teacher_effective_targets.py`, `evaluate_pinn_effective_wind_teacher.py` — PINN effective wind target 재구성
+PINN은 입력 풍속 `v`에 매우 민감하므로, 기존 `scada_ws_mean` 대신 발전량 물리에 더 가까운 effective wind target을 시도.
+
+추가 teacher feature:
+- lead hour (`forecast_kst_dtm - data_available_kst_dtm`)
+- LDAPS grid speed distribution: mean/std/min/max/p75
+- GFS grid speed distribution: mean/std/min/max/p75
+- gust grid statistics
+
+추가 teacher target:
+- `scada_ws_cubic = mean(ws^3)^(1/3)`
+- `scada_ws_p75`, `scada_ws_p90`, `scada_ws_max`, `scada_ws_ramp`
+
+Teacher 진단 결과:
+
+| fold | target | base R2 | extended R2 |
+|---|---|---:|---:|
+| 2023 | mean | 0.7548 | 0.7682 |
+| 2023 | p90 | 0.7737 | 0.7857 |
+| 2023 | cubic | - | 0.7775 |
+| 2024 | mean | 0.7988 | 0.8093 |
+| 2024 | p90 | 0.8091 | 0.8194 |
+| 2024 | cubic | - | 0.8148 |
+
+PINN 2024 holdout 결과:
+
+| variant | group_1 | group_2 | group_3 | 평균 |
+|---|---:|---:|---:|---:|
+| p90 effective wind | 0.6212 | 0.6421 | 0.5897 | 0.6177 |
+| cubic effective wind | 0.6305 | 0.6374 | 0.5905 | 0.6195 |
+| 50% cubic + 50% p90 | 0.6271 | 0.6426 | 0.5863 | 0.6187 |
+
+group_3 effective teacher + VESTAS prior:
+
+| variant | group_3 score |
+|---|---:|
+| UNISON cubic only | 0.5893 |
+| 30% UNISON + 70% VESTAS cubic | 0.5976 |
+| 50% UNISON + 50% VESTAS cubic | 0.5965 |
+| 30% UNISON + 70% VESTAS p90 | 0.5977 |
+
+해석:
+- Extended teacher feature는 SCADA target 예측 R2를 안정적으로 올림.
+- PINN에는 `cubic = mean(ws^3)^(1/3)`가 가장 자연스럽고, group_1을 크게 개선.
+- group_3는 여전히 VESTAS/group_2 prior를 섞어야 강함.
+- 다만 실제 LB에서 standard PINN-only가 낮았기 때문에, effective PINN도 단독 제출보다는 tree baseline과 보수적으로 blend해서 확인하는 것이 안전.
+
+생성한 제출 후보:
+- `results/submission_tree_only.csv`: 기존 tree-only isotonic anchor
+- `results/submission_effective_pinn.csv`: effective PINN-only
+- `results/submission_tree80_effective20.csv`
+- `results/submission_tree70_effective30.csv`
+- `results/submission_tree50_effective50.csv`
+
+현재 `results/submission.csv`는 가장 보수적인 신규 후보인 `tree80 + effective PINN20`으로 설정해 둠. tree-only anchor는 `results/submission_tree_only.csv`에 보관.
