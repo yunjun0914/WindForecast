@@ -688,3 +688,37 @@ Per-group best weights:
   2. `results/submission_pinn_meteo.csv` (multi-year 내부 best)
   3. `results/submission_tree_meteo50_pinn_meteo50.csv`
   4. `results/submission_tree_meteo_pinn_meteo_holdout_best.csv`
+
+### `evaluate_scada_teacher_model_variants.py`, `evaluate_pinn_meteo_teacher_model_blend.py` — SCADA teacher 모델 앙상블
+기존 meteo PINN teacher는 RandomForest 기반이었다. SCADA target 자체를 더 잘 예측하는 모델이 있는지 RF, ExtraTrees, HistGradientBoosting, 그리고 평균 앙상블을 비교했다.
+
+SCADA target 평균 R2:
+
+| fold | RF | ExtraTrees | HistGBR | RF+ExtraTrees | RF+HistGBR |
+|---|---:|---:|---:|---:|---:|
+| 2023 | 0.7817 | 0.7845 | 0.7811 | 0.7852 | 0.7857 |
+| 2024 | 0.8203 | 0.8213 | 0.8202 | 0.8224 | 0.8240 |
+
+가장 좋은 `RF+HistGBR` 평균 teacher를 PINN에 연결한 2024 holdout:
+
+| teacher | group_1 | group_2 | group_3 | 평균 |
+|---|---:|---:|---:|---:|
+| RF | 0.6265 | 0.6464 | 0.5999 | 0.6243 |
+| RF+HistGBR avg | 0.6300 | 0.6448 | 0.6015 | 0.6254 |
+
+해석:
+- teacher target R2 개선이 PINN 점수에도 작게 이어짐(+0.0012).
+- group2는 살짝 내려가지만 group1/group3가 개선된다.
+- 개선폭은 작지만 0.65 근처로 가는 데이터 방향에서는 유효한 조각.
+
+생성한 제출 후보:
+- `results/submission_pinn_meteo_teacher_blend.csv`
+- `results/submission_tree_meteo50_pinn_meteo_teacher_blend50.csv`
+- `results/submission_tree_meteo_pinn_meteo_teacher_blend_holdout_best.csv`
+
+현재 제출 우선순위:
+1. `results/submission.csv` (`all_meteo tree`, 안전 anchor)
+2. `results/submission_pinn_meteo.csv` (multi-year 내부 best, RF teacher)
+3. `results/submission_pinn_meteo_teacher_blend.csv` (RF+HistGBR teacher)
+4. `results/submission_tree_meteo50_pinn_meteo50.csv`
+5. `results/submission_tree_meteo50_pinn_meteo_teacher_blend50.csv`
