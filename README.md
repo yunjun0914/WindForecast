@@ -95,6 +95,11 @@ data/
 # 1. conda 환경 생성 (최초 1회)
 conda env create -f environment.yml
 
+# environment.yml/requirements.txt의 torch==2.6.0+cu124는 CUDA 빌드라 일반 PyPI
+# 인덱스에 없음. environment.yml로 설치가 안 되면 아래로 별도 설치 (GPU 없으면
+# --index-url 없이 `pip install torch`로 CPU 버전 설치)
+conda run -n WindForecast pip install torch --index-url https://download.pytorch.org/whl/cu124
+
 # 2. data/ 폴더에 원본 데이터 채워넣기 (위 "데이터 준비" 참고)
 
 # 3. 그룹×모델 검증 (선택, 실험용)

@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 models/artifacts/
 data/
+results/*.pt
+results/*.png
+results/*.txt
