@@ -722,3 +722,35 @@ SCADA target 평균 R2:
 3. `results/submission_pinn_meteo_teacher_blend.csv` (RF+HistGBR teacher)
 4. `results/submission_tree_meteo50_pinn_meteo50.csv`
 5. `results/submission_tree_meteo50_pinn_meteo_teacher_blend50.csv`
+
+### `evaluate_pinn_power_weighted_teacher.py`, `predict_pinn_meteo_hybrid_teacher.py` — power-weighted SCADA wind target
+SCADA에는 turbine별 wind speed뿐 아니라 `power_kw10m`도 있으므로, 실제 발전에 기여한 turbine wind를 더 크게 보는 target을 추가했다.
+
+추가 target:
+- `scada_ws_power_weighted = sum(ws * power) / sum(power)`
+- `scada_ws_power_weighted_cubic = cbrt(sum(ws^3 * power) / sum(power))`
+- `scada_power_active_ratio`
+
+RF+HistGBR teacher로 target을 예측하고 PINN 입력 `v`로 사용했다. group3는 기존처럼 30% UNISON + 70% VESTAS/group2 prior를 섞었다.
+
+2024 holdout:
+
+| variant | group_1 | group_2 | group_3 | 평균 |
+|---|---:|---:|---:|---:|
+| pw_mean | 0.6245 | 0.6412 | 0.6048 | 0.6235 |
+| pw_cubic | 0.6230 | 0.6432 | 0.6036 | 0.6233 |
+| 50% pw_cubic + 50% p90 | 0.6216 | 0.6430 | 0.6001 | 0.6216 |
+
+해석:
+- power-weighted target은 group3를 가장 잘 끌어올림(`0.6015 -> 0.6048` 수준).
+- 하지만 group1/group2는 기존 RF+HistGBR meteo teacher가 더 좋아서 전체 평균은 낮아짐.
+- 따라서 단독 제출보다는 group3만 power-weighted를 쓰는 hybrid가 더 타당.
+
+생성한 hybrid 후보:
+- `results/submission_pinn_meteo_hybrid_teacher.csv`
+- `results/submission_tree_meteo50_pinn_meteo_hybrid50.csv`
+- `results/submission_tree_meteo_pinn_meteo_hybrid_holdout_best.csv`
+
+현재 판단:
+- multi-year 안정성 1순위는 여전히 `submission_pinn_meteo.csv`.
+- 2024 group3 개선을 노리는 공격 후보로는 `submission_pinn_meteo_hybrid_teacher.csv`도 볼 만함.
