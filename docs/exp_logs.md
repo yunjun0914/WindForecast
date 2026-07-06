@@ -754,3 +754,30 @@ RF+HistGBR teacher로 target을 예측하고 PINN 입력 `v`로 사용했다. gr
 현재 판단:
 - multi-year 안정성 1순위는 여전히 `submission_pinn_meteo.csv`.
 - 2024 group3 개선을 노리는 공격 후보로는 `submission_pinn_meteo_hybrid_teacher.csv`도 볼 만함.
+
+### `evaluate_tree_meteo_model_sets.py`, `predict_tree_meteo_extra.py` — all_meteo tree에 ExtraTrees 추가
+이전 대회 알고리즘 폴더에 CatBoost 흔적이 있었지만 현재 `WindForecast` conda 환경에는 CatBoost가 설치되어 있지 않았다. 외부 설치 없이 쓸 수 있는 고분산 tree 후보로 ExtraTrees를 `all_meteo` tree ensemble에 추가해 검증했다.
+
+2024 holdout:
+
+| model set | raw | pooled isotonic |
+|---|---:|---:|
+| RF + LGBM + XGB | 0.5983 | 0.6045 |
+| ExtraTrees only | 0.5932 | 0.6029 |
+| LGBM + XGB + ExtraTrees | 0.5993 | 0.6054 |
+| RF + LGBM + XGB + ExtraTrees | 0.5986 | 0.6069 |
+
+해석:
+- ExtraTrees 단독은 약하지만, 기존 RF/LGBM/XGB와 오차 구조가 달라 ensemble에 넣으면 pooled isotonic 기준 `0.6045 -> 0.6069`로 개선.
+- 이 개선은 tree safe anchor에서 나온 것이므로, 기존 `results/submission.csv`를 all4 meteo tree 후보로 갱신.
+
+생성한 제출 후보:
+- `results/submission_tree_meteo_extra.csv`
+- `results/submission_tree_meteo_extra50_pinn_meteo50.csv`
+- `results/submission_tree_meteo_extra50_pinn_teacher_blend50.csv`
+
+현재 제출 우선순위 갱신:
+1. `results/submission.csv` = `submission_tree_meteo_extra.csv` (all4 meteo tree, 안전 anchor)
+2. `results/submission_pinn_meteo.csv` (multi-year 내부 best)
+3. `results/submission_pinn_meteo_teacher_blend.csv`
+4. `results/submission_tree_meteo_extra50_pinn_meteo50.csv`
