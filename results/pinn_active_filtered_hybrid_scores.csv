@@ -1,0 +1,7 @@
+﻿group,nmae,ficr,score,stage,variant,manufacturer
+kpx_group_1,0.12409957970343355,0.33828505647047136,0.607092738383519,physics_only,rf_hist_gbr_g12_active_filtered_g3,vestas
+kpx_group_2,0.13867916536199532,0.4309655708352581,0.6461432027366314,physics_only,rf_hist_gbr_g12_active_filtered_g3,vestas
+kpx_group_1,0.11998267633198434,0.38103542489818193,0.6305263742830988,with_bias,rf_hist_gbr_g12_active_filtered_g3,vestas
+kpx_group_2,0.13294488272525243,0.4220455163911845,0.644550316832966,with_bias,rf_hist_gbr_g12_active_filtered_g3,vestas
+kpx_group_3,0.13883407962076005,0.3417223023953202,0.60144411138728,physics_only,rf_hist_gbr_g12_active_filtered_g3,unison
+kpx_group_3,0.1386593592755893,0.33930595840605415,0.6003232995652323,with_bias,rf_hist_gbr_g12_active_filtered_g3,unison

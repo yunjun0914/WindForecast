@@ -781,3 +781,121 @@ RF+HistGBR teacher로 target을 예측하고 PINN 입력 `v`로 사용했다. gr
 2. `results/submission_pinn_meteo.csv` (multi-year 내부 best)
 3. `results/submission_pinn_meteo_teacher_blend.csv`
 4. `results/submission_tree_meteo_extra50_pinn_meteo50.csv`
+
+### `evaluate_tree_spatial_features_fast.py`, `evaluate_tree_spatial_recipe_model_sets.py` — info.xlsx 좌표 기반 spatial/weather 피처
+`info.xlsx`의 터빈 좌표를 파싱해서 group별 centroid와 능선축(PCA)을 만들고, LDAPS/GFS 격자를 group별 nearest, inverse-distance, upwind, axis projection 방식으로 다시 집계했다.
+
+Fast LGBM 2024 holdout:
+
+| spatial mode | yearly | quarter mean |
+|---|---:|---:|
+| none | 0.6033 | 0.6014 |
+| gfs | 0.6037 | 0.6004 |
+| ldaps | 0.6003 | 0.6017 |
+| all | 0.5998 | 0.6019 |
+
+group별로는 group1이 GFS spatial, group2가 all spatial에 반응했지만 group3는 spatial을 켜면 대체로 손해였다. 이를 반영한 all4 tree recipe 검증:
+
+| recipe | raw | pooled isotonic |
+|---|---:|---:|
+| 기존 all4 none | 0.5986 | 0.6069 |
+| g1 GFS + g2 all + g3 none | 0.6004 | 0.6072 |
+| g1 GFS + g2 all + g3 weighted | 0.6004 | 0.6069 |
+
+해석:
+- 좌표 기반 피처는 방향은 맞지만 개선폭이 매우 작다.
+- group3는 좌표/격자 재집계보다 SCADA teacher 쪽이 더 중요하다.
+- `g1_gfs_g2_all_g3_none`은 safe tree 미세 개선 후보지만, 단독 제출 우선순위는 HistGBR tree보다 낮다.
+
+### `evaluate_tree_direction_teacher_fast.py` — SCADA wind direction teacher
+SCADA `*_wd`를 시간별 circular target으로 만들고, forecast field에서 site-level wind direction(`sin/cos/concentration`)을 예측한 뒤 tree 입력에 추가했다.
+
+| direction teacher | yearly | quarter mean |
+|---|---:|---:|
+| none | 0.6033 | 0.6014 |
+| RF | 0.5938 | 0.5970 |
+| RF+HistGBR | 0.5992 | 0.5992 |
+
+해석:
+- q3 일부에서는 방향 teacher가 좋아졌지만, 전체적으로는 손해.
+- raw forecast direction과 마찬가지로 현재 metric/모델에서는 방향 정보가 안정적인 일반화 신호로 남지 않는다.
+- 방향을 다시 쓰려면 단순 direction feature가 아니라 speed regime/sector별 power-curve 또는 wake/curtailment mask로 써야 한다.
+
+### `evaluate_pinn_active_filtered_teacher.py`, `evaluate_pinn_active_filtered_hybrid.py` — active-filtered SCADA teacher
+SCADA 평균 풍속 target에서 `power≈0`인데 풍속이 충분히 높은 샘플을 줄이기 위해 active-filtered target을 만들었다. 저풍속 정지는 실제 저풍속 신호이므로 유지하고, 발전 중인 터빈 또는 저풍속 샘플 위주로 `ws_mean/p90/cubic`을 재계산했다.
+
+2024 holdout:
+
+| variant | group_1 | group_2 | group_3 | mean |
+|---|---:|---:|---:|---:|
+| filtered cubic | 0.6261 | 0.6420 | 0.6011 | 0.6231 |
+| filtered p90 | 0.6164 | 0.6437 | 0.5988 | 0.6197 |
+| filtered cubic/p90 mix | 0.6212 | 0.6449 | 0.6048 | 0.6236 |
+| g1/g2 RF+HistGBR + g3 active-filtered | 0.6305 | 0.6446 | 0.6003 | 0.6251 |
+
+해석:
+- active filtering은 group3 단독에는 도움(`~0.6048`)이 될 수 있다.
+- 하지만 g1/g2에서는 기존 RF+HistGBR meteo teacher가 더 강하고, hybrid도 평균상 기존 `pinn_meteo_teacher_blend`를 뚜렷하게 넘지는 못했다.
+- group3 개선 방향으로는 유지하되, 현재 제출 우선순위에서는 보조 후보.
+
+### `evaluate_tree_meteo_more_model_sets.py`, `predict_tree_meteo_hist.py` — HistGradientBoosting tree anchor
+기존 all4 tree(RF/LGBM/XGB/ExtraTrees)에 더해 sklearn `HistGradientBoostingRegressor`를 비교했다. 외부 설치 없이 바로 쓸 수 있고, isotonic calibration과 궁합이 좋았다.
+
+2024 holdout:
+
+| model set | raw | pooled isotonic |
+|---|---:|---:|
+| all4 tree | 0.5986 | 0.6069 |
+| HistGBR only | 0.6049 | 0.6094 |
+| all4 + HistGBR | 0.6005 | 0.6083 |
+| LGBM + XGB + ExtraTrees + HistGBR | 0.6016 | 0.6083 |
+
+Group scores for `HistGBR only + pooled isotonic`:
+
+| group | score |
+|---|---:|
+| group1 | 0.6195 |
+| group2 | 0.6450 |
+| group3 | 0.5637 |
+| mean | 0.6094 |
+
+해석:
+- HistGBR 단독이 tree safe anchor에서 현재 최고(`0.6069 -> 0.6094`).
+- all4와 섞으면 평균은 약간 내려가므로 제출용 tree anchor는 HistGBR 단독이 가장 깔끔하다.
+- 기존 PINN 후보와 blend 파일도 생성했지만, 실제 LB에서 PINN-only가 낮게 나온 전례가 있으므로 `submission.csv`는 보수적으로 HistGBR tree anchor로 갱신.
+
+생성한 제출 후보:
+- `results/submission_tree_meteo_hist.csv`
+- `results/submission_tree_meteo_hist50_pinn_meteo50.csv`
+- `results/submission_tree_meteo_hist50_pinn_teacher_blend50.csv`
+- `results/submission_tree_meteo_hist90_pinn_meteo10.csv`
+
+현재 제출 우선순위:
+1. `results/submission.csv` = `submission_tree_meteo_hist.csv` (HistGBR meteo tree, 최신 안전 anchor)
+2. `results/submission_tree_meteo_hist90_pinn_meteo10.csv` (보수적 PINN 10% blend)
+3. `results/submission_pinn_meteo.csv` (multi-year 내부 best지만 LB underperform 전례 있음)
+4. `results/submission_pinn_meteo_teacher_blend.csv`
+5. `results/submission_tree_meteo_hist50_pinn_meteo50.csv` / `hist50_pinn_teacher_blend50` (공격 후보)
+
+다음 데이터 아이디어:
+- group3는 좌표보다 SCADA teacher target 품질이 핵심이므로 active filtering threshold/low-wind keep rule을 sweep.
+- HistGBR tree에 SCADA teacher predicted wind features를 직접 넣는 재시도. 과거 RF/LGBM/XGB에서는 약했지만 HistGBR와는 상호작용이 다를 수 있음.
+- 2025 test weather distribution이 2023/2024 중 어느 해와 가까운지 보고 calibration/blend weight를 year-similarity 기반으로 조정.
+
+### `evaluate_tree_hist_scada_teacher.py` — HistGBR tree + SCADA teacher direct features 재검증
+HistGBR tree가 기존 all4 tree보다 잘 맞았기 때문에, SCADA teacher predicted wind distribution을 HistGBR 입력에 직접 넣는 조합을 재검증했다. teacher는 2024 검증 시작 이전 SCADA만 보고 fit하는 honest setup.
+
+2024 holdout:
+
+| teacher feature | raw | pooled isotonic |
+|---|---:|---:|
+| none | 0.6049 | 0.6094 |
+| RF cubic | 0.6000 | 0.6002 |
+| RF p90 | 0.5998 | 0.6002 |
+| RF+HistGBR cubic | 0.6023 | 0.6031 |
+| RF+HistGBR p90 | 0.6023 | 0.6031 |
+
+해석:
+- HistGBR에서도 SCADA teacher direct feature는 손해.
+- PINN에서는 teacher가 핵심 입력으로 잘 작동하지만, tree에서는 teacher 예측값이 기존 forecast/meteo feature와 중복되거나 calibration을 흐리는 것으로 보임.
+- 따라서 tree safe anchor는 `HistGBR all_meteo + pooled isotonic` 유지.
