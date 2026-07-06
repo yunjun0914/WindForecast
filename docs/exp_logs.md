@@ -492,4 +492,29 @@ group_3 effective teacher + VESTAS prior:
 - `results/submission_tree70_effective30.csv`
 - `results/submission_tree50_effective50.csv`
 
-현재 `results/submission.csv`는 가장 보수적인 신규 후보인 `tree80 + effective PINN20`으로 설정해 둠. tree-only anchor는 `results/submission_tree_only.csv`에 보관.
+추가로 더 보수적인 후보도 생성:
+- `results/submission_tree95_effective05.csv`
+- `results/submission_tree90_effective10.csv`
+
+현재 `results/submission.csv`는 LB-safe 성격을 우선해 `tree90 + effective PINN10`으로 설정해 둠. tree-only anchor는 `results/submission_tree_only.csv`에 보관.
+
+### `evaluate_effective_tree_time_holdout.py` — effective teacher/grid feature를 tree에 직접 추가
+PINN에서 먹힌 effective wind teacher와 grid distribution을 tree feature로 직접 넣어봄. 후보:
+- `effective_teacher`: 기존 tree feature + predicted effective wind targets
+- `effective_teacher_grid`: 위 + selected lead/grid distribution stats
+
+2024 time-holdout 결과:
+
+| feature set | model | group_1 | group_2 | group_3 | 평균 |
+|---|---|---:|---:|---:|---:|
+| effective_teacher | RF | 0.5973 | 0.6367 | 0.5519 | 0.5953 |
+| effective_teacher | LGBM | 0.6062 | 0.6295 | 0.5514 | 0.5957 |
+| effective_teacher | ensemble | 0.6037 | 0.6314 | 0.5481 | 0.5944 |
+| effective_teacher_grid | RF | 0.5950 | 0.6346 | 0.5557 | 0.5951 |
+| effective_teacher_grid | LGBM | 0.6108 | 0.6300 | 0.5535 | 0.5981 |
+| effective_teacher_grid | ensemble | 0.6048 | 0.6325 | 0.5540 | 0.5971 |
+
+해석:
+- effective teacher/grid feature는 일부 group/model에서는 개선되지만, 기존 tree baseline/pooled calibration을 확실히 넘지는 못함.
+- 특히 group_3는 여전히 약하고, tree는 feature 추가보다 보정/앙상블이 더 중요해 보임.
+- effective wind는 tree 직접 feature보다는 PINN 입력 또는 tree/PINN 소량 blend로 쓰는 쪽이 더 타당.
