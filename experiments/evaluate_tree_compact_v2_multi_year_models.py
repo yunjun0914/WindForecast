@@ -11,7 +11,7 @@ from xgboost import XGBRegressor
 import _bootstrap  # noqa: F401
 from predict_tree_compact_physics_v2 import build_all_meteo_compact_v2
 from utils.metrics import GROUP_CAPACITY_KWH, TARGET_COLS, group_nmae_ficr
-from utils.power_curve import GROUP_N_TURBINES, add_power_curve_feature, fit_group_power_curve
+from utils.power_curve import GROUP_N_TURBINES, add_power_curve_feature_oof
 from utils.preprocessing import HUB_HEIGHT_PROXY_COL, TIME_KEY_COLS
 
 
@@ -102,6 +102,12 @@ def filter_scada_years(scada, years):
     return out[out["kst_dtm"].dt.year.isin(years)].reset_index(drop=True)
 
 
+def filter_weather_years(weather, years):
+    out = weather.copy()
+    out["forecast_kst_dtm"] = pd.to_datetime(out["forecast_kst_dtm"])
+    return out[out["forecast_kst_dtm"].dt.year.isin(years)].reset_index(drop=True)
+
+
 def build_group_table(weather, labels, group):
     labels = labels.copy()
     labels["kst_dtm"] = pd.to_datetime(labels["kst_dtm"])
@@ -185,8 +191,17 @@ def main():
             if len(scada) == 0:
                 print(f"{group}: skip no scada")
                 continue
-            curve = fit_group_power_curve(scada, group)
-            weather = add_power_curve_feature(feature_cache[group], HUB_HEIGHT_PROXY_COL, curve, GROUP_N_TURBINES[group])
+            train_weather_base = filter_weather_years(feature_cache[group], train_years)
+            val_weather_base = filter_weather_years(feature_cache[group], [pred_year])
+            train_weather, val_weather = add_power_curve_feature_oof(
+                train_weather_base,
+                val_weather_base,
+                scada,
+                group,
+                HUB_HEIGHT_PROXY_COL,
+                GROUP_N_TURBINES[group],
+            )
+            weather = pd.concat([train_weather, val_weather], ignore_index=True)
             table = build_group_table(weather, labels, group)
             train_base = table[table["year"].isin(train_years)].copy()
             val = table[table["year"] == pred_year].copy()

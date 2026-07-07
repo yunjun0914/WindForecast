@@ -9,13 +9,12 @@ from utils.meteo_features import add_meteo_block, build_meteo_features
 from utils.metrics import GROUP_CAPACITY_KWH, group_nmae_ficr
 import utils.pinn_effective_pipeline as pfte
 from utils.pinn_effective_pipeline import (
-    apply_extended_teacher,
+    apply_extended_teacher_crossfit,
     blend_weather,
     build_extended_pinn_weather,
     filter_forecast_years,
     filter_label_years,
     filter_scada_years,
-    fit_extended_teacher,
 )
 from utils.pinn_scada_teacher_config import apply_best_scada_teacher_pinn_hparams
 
@@ -37,8 +36,7 @@ def build_weather_base(ldaps, gfs, use_effective_grid):
 
 
 def teacher_train_pred(weather_train, weather_pred, scada_df, group, v_mode):
-    teacher = fit_extended_teacher(weather_train, scada_df, group, fit_before=None)
-    return apply_extended_teacher(weather_train, teacher, v_mode), apply_extended_teacher(weather_pred, teacher, v_mode)
+    return apply_extended_teacher_crossfit(weather_train, weather_pred, scada_df, group, v_mode)
 
 
 def build_weather_for_fold(train_years, pred_year):
@@ -58,11 +56,19 @@ def build_weather_for_fold(train_years, pred_year):
     scada_vestas = filter_scada_years(pd.read_csv("data/train/scada_vestas_train.csv", encoding="utf-8-sig"), train_years)
     scada_unison = filter_scada_years(pd.read_csv("data/train/scada_unison_train.csv", encoding="utf-8-sig"), train_years)
 
-    g1_train, g1_pred = teacher_train_pred(effective_train, effective_pred, scada_vestas, GROUP1, "cubic")
-    g2_train, g2_pred = teacher_train_pred(canonical_train, canonical_pred, scada_vestas, GROUP2, "p90")
+    g1_train, g1_pred = teacher_train_pred(
+        effective_train, effective_pred, scada_vestas, GROUP1, "cubic"
+    )
+    g2_train, g2_pred = teacher_train_pred(
+        canonical_train, canonical_pred, scada_vestas, GROUP2, "p90"
+    )
 
-    g3_unison_train, g3_unison_pred = teacher_train_pred(canonical_train, canonical_pred, scada_unison, GROUP3, "p90")
-    g3_vestas_train, g3_vestas_pred = teacher_train_pred(canonical_train, canonical_pred, scada_vestas, GROUP2, "p90")
+    g3_unison_train, g3_unison_pred = teacher_train_pred(
+        canonical_train, canonical_pred, scada_unison, GROUP3, "p90"
+    )
+    g3_vestas_train, g3_vestas_pred = teacher_train_pred(
+        canonical_train, canonical_pred, scada_vestas, GROUP2, "p90"
+    )
     g3_train = blend_weather("effective_g1_group3_canonical_mix", g3_unison_train, g3_vestas_train, 0.30)
     g3_pred = blend_weather("effective_g1_group3_canonical_mix", g3_unison_pred, g3_vestas_pred, 0.30)
 
@@ -146,7 +152,22 @@ def score_fold(pred, labels_all):
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--teacher-backend", default=pfte.TEACHER_BACKEND, choices=["rf_oob", "lgbm_time_oof"])
+    parser.add_argument("--stem", default=None)
+    args = parser.parse_args()
+
     apply_best_scada_teacher_pinn_hparams(pfte)
+    pfte.TEACHER_BACKEND = args.teacher_backend
+    stem = args.stem or (
+        "pinn_effective_grid_g1_year_bagging"
+        if args.teacher_backend == "rf_oob"
+        else f"pinn_effective_grid_g1_year_bagging_{args.teacher_backend}"
+    )
+    results_path = f"results/{stem}_oof_scores.csv"
+    oof_path = f"results/{stem}_oof_predictions.csv"
     years = [2022, 2023, 2024]
     labels_all = pd.read_csv("data/train/train_labels.csv", encoding="utf-8-sig")
 
@@ -181,12 +202,12 @@ def main():
         ignore_index=True,
     )
     oof = pd.concat(oof_preds, ignore_index=True)
-    scores.to_csv(RESULTS_PATH, index=False, encoding="utf-8-sig")
-    oof.to_csv(OOF_PATH, index=False, encoding="utf-8-sig")
+    scores.to_csv(results_path, index=False, encoding="utf-8-sig")
+    oof.to_csv(oof_path, index=False, encoding="utf-8-sig")
     print("\n=== effective-g1 OOF scores ===")
     print(scores.to_string(index=False))
-    print(f"saved {RESULTS_PATH}")
-    print(f"saved {OOF_PATH}")
+    print(f"saved {results_path}")
+    print(f"saved {oof_path}")
     return scores
 
 

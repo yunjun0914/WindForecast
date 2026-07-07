@@ -7,7 +7,7 @@ from lightgbm import LGBMRegressor
 from utils.compact_physics_features import add_compact_physics_features
 from utils.meteo_features import add_meteo_block, build_meteo_features
 from utils.metrics import GROUP_CAPACITY_KWH
-from utils.power_curve import GROUP_N_TURBINES, add_power_curve_feature, fit_group_power_curve
+from utils.power_curve import GROUP_N_TURBINES, add_power_curve_feature_oof
 from utils.preprocessing import HUB_HEIGHT_PROXY_COL, TIME_KEY_COLS, build_group_dataset, build_weather_features
 
 
@@ -39,9 +39,14 @@ def build_all_meteo_compact_v2(ldaps, gfs, group):
 
 
 def predict_group(train_weather, test_weather, labels, scada, group):
-    curve = fit_group_power_curve(scada, group)
-    train_weather = add_power_curve_feature(train_weather, HUB_HEIGHT_PROXY_COL, curve, GROUP_N_TURBINES[group])
-    test_weather = add_power_curve_feature(test_weather, HUB_HEIGHT_PROXY_COL, curve, GROUP_N_TURBINES[group])
+    train_weather, test_weather = add_power_curve_feature_oof(
+        train_weather,
+        test_weather,
+        scada,
+        group,
+        HUB_HEIGHT_PROXY_COL,
+        GROUP_N_TURBINES[group],
+    )
 
     x_train, y_train = build_group_dataset(train_weather, labels, group)
     feature_cols = [c for c in train_weather.columns if c not in TIME_KEY_COLS]

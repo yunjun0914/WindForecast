@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import torch
+from lightgbm import LGBMRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.multioutput import MultiOutputRegressor
 
@@ -36,6 +37,8 @@ GROUP1 = "kpx_group_1"
 GROUP2 = "kpx_group_2"
 GROUP3 = "kpx_group_3"
 GROUPS = [GROUP1, GROUP2, GROUP3]
+TEACHER_BACKEND = "rf_oob"
+TEACHER_TIME_FOLDS = 5
 
 EXT_TARGETS = [
     "scada_ws_mean",
@@ -120,6 +123,7 @@ def build_extended_scada_targets(scada_df, group):
     scada["hour"] = scada["kst_dtm"].dt.floor("h")
     ws_cols = [f"{prefix}_ws" for prefix in GROUP_TURBINE_PREFIXES[group]]
     hourly = scada.groupby("hour")[ws_cols].mean()
+    hourly = hourly.dropna(how="all")
     values = hourly.to_numpy(dtype=float)
 
     out = pd.DataFrame({"forecast_kst_dtm": hourly.index})
@@ -153,10 +157,27 @@ def fit_extended_teacher(weather, scada_df, group, fit_before=None):
     return feature_cols, model
 
 
-def apply_extended_teacher(weather, teacher, v_mode):
-    feature_cols, model = teacher
+def _make_lgbm_teacher(seed=42):
+    return MultiOutputRegressor(
+        LGBMRegressor(
+            random_state=seed,
+            n_jobs=-1,
+            verbose=-1,
+            n_estimators=700,
+            learning_rate=0.035,
+            num_leaves=48,
+            min_child_samples=80,
+            subsample=0.85,
+            colsample_bytree=0.85,
+            reg_alpha=0.05,
+            reg_lambda=2.0,
+        )
+    )
+
+
+def _apply_extended_teacher_predictions(weather, pred, v_mode):
     out = weather.copy()
-    pred = pd.DataFrame(model.predict(out[feature_cols]), columns=EXT_TARGETS, index=out.index)
+    pred = pd.DataFrame(pred, columns=EXT_TARGETS, index=out.index)
     for col in EXT_TARGETS:
         out[col] = np.clip(pred[col], 0, None)
 
@@ -177,6 +198,82 @@ def apply_extended_teacher(weather, teacher, v_mode):
     out["v"] = np.clip(v, 0, None)
     out["v_std"] = np.clip(0.5 * out["scada_ws_std"] + 0.5 * spread_sigma, 0.05, None)
     return out
+
+
+def apply_extended_teacher(weather, teacher, v_mode):
+    feature_cols, model = teacher
+    return _apply_extended_teacher_predictions(weather, model.predict(weather[feature_cols]), v_mode)
+
+
+def _apply_extended_teacher_rf_oob(weather_train, weather_pred, scada_df, group, v_mode):
+    """Fit teacher on all train years, but use RF OOB predictions for train rows."""
+    targets = build_extended_scada_targets(scada_df, group)
+    weather_indexed = weather_train.reset_index().rename(columns={"index": "_weather_idx"})
+    df = weather_indexed.merge(targets, on="forecast_kst_dtm", how="inner").dropna()
+    feature_cols = extended_feature_cols(weather_train)
+    model = RandomForestRegressor(
+        n_estimators=100,
+        min_samples_leaf=10,
+        random_state=42,
+        n_jobs=-1,
+        oob_score=True,
+        bootstrap=True,
+    )
+    model.fit(df[feature_cols], df[EXT_TARGETS])
+
+    train_pred = model.predict(weather_train[feature_cols])
+    oob_pred = np.asarray(model.oob_prediction_)
+    if oob_pred.ndim == 1:
+        oob_pred = oob_pred.reshape(-1, 1)
+    valid_oob = np.isfinite(oob_pred).all(axis=1)
+    train_pred[df.loc[valid_oob, "_weather_idx"].to_numpy(dtype=int)] = oob_pred[valid_oob]
+
+    train_teacher = _apply_extended_teacher_predictions(weather_train, train_pred, v_mode)
+    pred_teacher = _apply_extended_teacher_predictions(weather_pred, model.predict(weather_pred[feature_cols]), v_mode)
+    return train_teacher, pred_teacher
+
+
+def _apply_extended_teacher_lgbm_time_oof(weather_train, weather_pred, scada_df, group, v_mode):
+    """Fit LGBM teacher on train years, using time-fold OOF predictions for train rows."""
+    targets = build_extended_scada_targets(scada_df, group)
+    weather_indexed = weather_train.reset_index().rename(columns={"index": "_weather_idx"})
+    df = weather_indexed.merge(targets, on="forecast_kst_dtm", how="inner").dropna()
+    df = df.sort_values("forecast_kst_dtm").reset_index(drop=True)
+    feature_cols = extended_feature_cols(weather_train)
+
+    full_model = _make_lgbm_teacher(seed=42)
+    full_model.fit(df[feature_cols], df[EXT_TARGETS])
+    train_pred = full_model.predict(weather_train[feature_cols])
+
+    n_folds = min(TEACHER_TIME_FOLDS, len(df))
+    if n_folds >= 2:
+        for fold_id, fold_idx in enumerate(np.array_split(np.arange(len(df)), n_folds)):
+            if len(fold_idx) == 0:
+                continue
+            fit_idx = np.setdiff1d(np.arange(len(df)), fold_idx, assume_unique=True)
+            if len(fit_idx) == 0:
+                continue
+            model = _make_lgbm_teacher(seed=42 + fold_id + 1)
+            model.fit(df.iloc[fit_idx][feature_cols], df.iloc[fit_idx][EXT_TARGETS])
+            oof_pred = model.predict(df.iloc[fold_idx][feature_cols])
+            train_pred[df.iloc[fold_idx]["_weather_idx"].to_numpy(dtype=int)] = oof_pred
+
+    train_teacher = _apply_extended_teacher_predictions(weather_train, train_pred, v_mode)
+    pred_teacher = _apply_extended_teacher_predictions(weather_pred, full_model.predict(weather_pred[feature_cols]), v_mode)
+    return train_teacher, pred_teacher
+
+
+def apply_extended_teacher_crossfit(weather_train, weather_pred, scada_df, group, v_mode, backend=None):
+    backend = TEACHER_BACKEND if backend is None else backend
+    if backend == "rf_oob":
+        return _apply_extended_teacher_rf_oob(weather_train, weather_pred, scada_df, group, v_mode)
+    if backend == "lgbm_time_oof":
+        return _apply_extended_teacher_lgbm_time_oof(weather_train, weather_pred, scada_df, group, v_mode)
+    raise ValueError(f"unknown teacher backend: {backend}")
+
+
+def apply_extended_teacher_oob(weather_train, weather_pred, scada_df, group, v_mode):
+    return _apply_extended_teacher_rf_oob(weather_train, weather_pred, scada_df, group, v_mode)
 
 
 def blend_weather(name, weather_a, weather_b, weight_a):
@@ -345,4 +442,3 @@ def predict_pinn(model, bias, group, weather_test):
     with torch.no_grad():
         pred = group_prediction(model, weather_test, GROUP_N_TURBINES[group], bias=bias, use_wind_distribution=True)
         return torch.clamp(pred, min=0.0, max=GROUP_CAPACITY_KWH[group]).cpu().numpy()
-

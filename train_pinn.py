@@ -9,12 +9,11 @@ from utils.pinn_data import (
     CUT_OUT_SPEED,
     GROUP_MANUFACTURER,
     GROUP_N_TURBINES,
+    apply_scada_wind_teacher_oob,
     RATED_SPEED,
-    apply_scada_wind_teacher,
     apply_wind_speed_correction,
     build_group_pinn_dataset,
     build_pinn_weather,
-    fit_scada_wind_teacher,
     fit_wind_speed_correction,
 )
 from utils.pinn_losses import (
@@ -354,11 +353,15 @@ def load_training_data():
     for group, scada in scada_by_group.items():
         if USE_SCADA_WIND_TEACHER:
             fit_before = VAL_START if HONEST_SCADA_TEACHER_HOLDOUT else None
-            teacher = fit_scada_wind_teacher(weather_train_raw, scada, group, fit_before=fit_before)
-            group_weather[group] = apply_scada_wind_teacher(weather_train_raw, teacher)
+            group_weather[group] = apply_scada_wind_teacher_oob(
+                weather_train_raw, scada, group, fit_before=fit_before
+            )
         else:
             manufacturer = GROUP_MANUFACTURER[group]
-            correction = fit_wind_speed_correction(weather_train_raw, scada_by_manufacturer[manufacturer], manufacturer)
+            fit_before = VAL_START if HONEST_SCADA_TEACHER_HOLDOUT else None
+            correction = fit_wind_speed_correction(
+                weather_train_raw, scada_by_manufacturer[manufacturer], manufacturer, fit_before=fit_before
+            )
             group_weather[group] = apply_wind_speed_correction(weather_train_raw, correction)
 
     weather_by_manufacturer = {}

@@ -27,18 +27,29 @@ Important result files:
 | Result | File | Note |
 |---|---|---|
 | Best public candidate | `results/submission_pinn50_tree_all_meteo_compact_v2_50.csv` | public around `0.62423` |
+| Current final candidate | `results/submission.csv` | LGBM-teacher PINN 50% + tuned LGBM TREE 50% |
+| Current aggressive candidate | `results/submission_pinn40_tree60_lgbmteacher_powerlgbm_v2_l1.csv` | validation best weight, tree=0.60 |
 | PINN only candidate | `results/submission_pinn_effective_grid_g1_year_bagging.csv` | PINN-only reference |
 | TREE candidate | `results/submission_tree_compact_v2_metric_valid_lgbm_mean.csv` | tree-only reference |
 | PINN OOF | `results/pinn_effective_grid_g1_year_bagging_oof_predictions.csv` | blend validation input |
+| PINN OOF, LGBM teacher | `results/pinn_effective_grid_g1_year_bagging_lgbm_time_oof_oof_predictions.csv` | current PINN validation input |
 | TREE OOF | `results/tree_compact_v2_multi_year_lgbm_policy_predictions.csv` | blend validation input |
+| Tuned TREE OOF | `results/power_lgbm_best_v2_l1_predictions.csv` | current TREE validation input |
 
 ## Current Scores
+
+Latest update: 2026-07-08 02:43:51 +09:00
 
 Validation 기준:
 
 | Model | Mean score | Mean nMAE | Mean FICR | Note |
 |---|---:|---:|---:|---|
+| PINN, corrected RF-OOB teacher | `0.60838` | `0.14124` | `0.35800` | honest teacher baseline |
+| PINN, LGBM time-OOF teacher | `0.61259` | `0.14268` | `0.36786` | better FICR, group3 slightly worse |
 | TREE only, metric-valid LGBM mean | `0.61157` | `0.13045` | `0.35358` | current tree baseline |
+| TREE only, tuned group LGBM v2 | `0.62361` | `0.12851` | `0.37573` | group-specific hparams, OOF power-curve |
+| PINN/TREE blend, LGBM teacher + tuned TREE, tree=0.50 | `0.62679` | `0.13001` | `0.38359` | current stable final candidate |
+| PINN/TREE blend, LGBM teacher + tuned TREE, tree=0.60 | `0.62749` | `0.12879` | `0.38378` | validation best, slightly less conservative |
 | PINN/TREE blend, best validation weight near tree=0.4 | `0.62481` | `0.12908` | `0.37870` | validation best |
 | PINN50:TREE50 public submission | `0.62423` | - | - | best confirmed public candidate |
 
@@ -48,9 +59,9 @@ These are useful but not main pipeline code.
 
 | Idea | Current judgment |
 |---|---|
-| Tree hyperparameter search | highest-priority next work |
-| Group-specific tree tuning | likely useful, especially group3 |
-| Sample-weight policy search | likely useful for FICR/NMAE tradeoff |
+| Tree hyperparameter search | useful; v2 focused L1 search improved TREE OOF by about `+0.012` |
+| Group-specific tree tuning | confirmed useful |
+| Sample-weight policy search | useful; `actual_sqrt` often won in v2 |
 | Weather calibration using SCADA | conceptually strong but hard; keep as later track |
 | SCADA inventory/data quality audit | useful reference only |
 
@@ -87,11 +98,11 @@ Do not restart broad feature-chasing yet.
 
 Next recommended sequence:
 
-1. Build a clean `tree_hparam_search_v1` around the current TREE pipeline.
-2. Tune LGBM/XGB by year-fold validation.
-3. Tune group-specific model/hparams.
-4. Tune sample weighting for FICR.
-5. Re-evaluate fixed `PINN50:TREE50` blend only when tree validation improves meaningfully.
+1. Submit or externally check `results/submission.csv`.
+2. If public score confirms direction, commit the LGBM-teacher/tuned-tree pipeline.
+3. Next tuning: XGB/ExtraTrees diversity for TREE ensemble.
+4. Optional: group3-specific teacher backend mix, because RF teacher was better for group3 than LGBM.
+5. Keep `PINN50:TREE50` as stable default unless user explicitly chooses validation-best tree=0.60.
 
 Submission rule:
 

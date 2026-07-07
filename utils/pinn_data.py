@@ -131,7 +131,7 @@ def build_pinn_weather(ldaps_df, gfs_df=None):
     return out
 
 
-def fit_wind_speed_correction(weather_pinn, scada_df, manufacturer):
+def fit_wind_speed_correction(weather_pinn, scada_df, manufacturer, fit_before=None):
     """Even after the hub-height extrapolation, LDAPS v is only corr~0.8 with real
     SCADA wind speed. Fit a simple linear bias correction (v_true ~ a + b*v_ldaps) on
     the training period's own SCADA, to be applied at both train and test time -- the
@@ -147,6 +147,8 @@ def fit_wind_speed_correction(weather_pinn, scada_df, manufacturer):
     w["hour"] = w["forecast_kst_dtm"].dt.floor("h")
     correction_cols = [col for col in WIND_CORRECTION_FEATURES if col in w.columns]
     merged = w.set_index("hour")[correction_cols].join(scada_v).dropna()
+    if fit_before is not None:
+        merged = merged[merged.index < pd.Timestamp(fit_before)]
 
     x = merged[correction_cols].to_numpy()
     x_mean = x.mean(axis=0)
@@ -213,10 +215,8 @@ def fit_scada_wind_teacher(weather_pinn, scada_df, group, fit_before=None):
     return feature_cols, model
 
 
-def apply_scada_wind_teacher(weather_pinn, teacher_model):
-    feature_cols, model = teacher_model
+def _apply_scada_wind_teacher_predictions(weather_pinn, pred):
     out = weather_pinn.copy()
-    pred = model.predict(out[feature_cols])
     pred_df = pd.DataFrame(pred, columns=SCADA_TEACHER_TARGETS, index=out.index)
     spread_sigma = (pred_df["scada_ws_p90"] - pred_df["scada_ws_p10"]) / 2.563
     out["v"] = np.clip(pred_df["scada_ws_mean"], 0, None)
@@ -224,6 +224,37 @@ def apply_scada_wind_teacher(weather_pinn, teacher_model):
     for col in SCADA_TEACHER_TARGETS:
         out[col] = pred_df[col]
     return out
+
+
+def apply_scada_wind_teacher(weather_pinn, teacher_model):
+    feature_cols, model = teacher_model
+    return _apply_scada_wind_teacher_predictions(weather_pinn, model.predict(weather_pinn[feature_cols]))
+
+
+def apply_scada_wind_teacher_oob(weather_pinn, scada_df, group, fit_before=None):
+    teacher = build_scada_wind_teacher(scada_df, group)
+    weather_indexed = weather_pinn.reset_index().rename(columns={"index": "_weather_idx"})
+    df = weather_indexed.merge(teacher, on="forecast_kst_dtm", how="inner").dropna()
+    if fit_before is not None:
+        df = df[df["forecast_kst_dtm"] < pd.Timestamp(fit_before)]
+    feature_cols = _teacher_feature_cols(weather_pinn)
+    model = RandomForestRegressor(
+        n_estimators=300,
+        min_samples_leaf=10,
+        random_state=42,
+        n_jobs=-1,
+        oob_score=True,
+        bootstrap=True,
+    )
+    model.fit(df[feature_cols], df[SCADA_TEACHER_TARGETS])
+
+    pred = model.predict(weather_pinn[feature_cols])
+    oob_pred = np.asarray(model.oob_prediction_)
+    if oob_pred.ndim == 1:
+        oob_pred = oob_pred.reshape(-1, 1)
+    valid_oob = np.isfinite(oob_pred).all(axis=1)
+    pred[df.loc[valid_oob, "_weather_idx"].to_numpy(dtype=int)] = oob_pred[valid_oob]
+    return _apply_scada_wind_teacher_predictions(weather_pinn, pred)
 
 
 def build_group_pinn_dataset(weather_pinn, labels_df, group):

@@ -9,13 +9,12 @@ from utils.meteo_features import add_meteo_block, build_meteo_features
 from utils.metrics import GROUP_CAPACITY_KWH
 import utils.pinn_effective_pipeline as pfte
 from utils.pinn_effective_pipeline import (
-    apply_extended_teacher,
+    apply_extended_teacher_crossfit,
     blend_weather,
     build_extended_pinn_weather,
     filter_forecast_years,
     filter_label_years,
     filter_scada_years,
-    fit_extended_teacher,
 )
 from utils.pinn_scada_teacher_config import apply_best_scada_teacher_pinn_hparams
 
@@ -33,8 +32,7 @@ def build_weather_base(ldaps, gfs, use_effective_grid):
 
 
 def teacher_train_test(weather_train, weather_test, scada_df, group, v_mode):
-    teacher = fit_extended_teacher(weather_train, scada_df, group, fit_before=None)
-    return apply_extended_teacher(weather_train, teacher, v_mode), apply_extended_teacher(weather_test, teacher, v_mode)
+    return apply_extended_teacher_crossfit(weather_train, weather_test, scada_df, group, v_mode)
 
 
 def build_weather_for_years(train_years):
@@ -54,11 +52,19 @@ def build_weather_for_years(train_years):
     scada_vestas = filter_scada_years(pd.read_csv("data/train/scada_vestas_train.csv", encoding="utf-8-sig"), train_years)
     scada_unison = filter_scada_years(pd.read_csv("data/train/scada_unison_train.csv", encoding="utf-8-sig"), train_years)
 
-    g1_train, g1_test = teacher_train_test(effective_train, effective_test, scada_vestas, pfte.GROUP1, "cubic")
-    g2_train, g2_test = teacher_train_test(canonical_train, canonical_test, scada_vestas, pfte.GROUP2, "p90")
+    g1_train, g1_test = teacher_train_test(
+        effective_train, effective_test, scada_vestas, pfte.GROUP1, "cubic"
+    )
+    g2_train, g2_test = teacher_train_test(
+        canonical_train, canonical_test, scada_vestas, pfte.GROUP2, "p90"
+    )
 
-    g3_unison_train, g3_unison_test = teacher_train_test(canonical_train, canonical_test, scada_unison, pfte.GROUP3, "p90")
-    g3_vestas_train, g3_vestas_test = teacher_train_test(canonical_train, canonical_test, scada_vestas, pfte.GROUP2, "p90")
+    g3_unison_train, g3_unison_test = teacher_train_test(
+        canonical_train, canonical_test, scada_unison, pfte.GROUP3, "p90"
+    )
+    g3_vestas_train, g3_vestas_test = teacher_train_test(
+        canonical_train, canonical_test, scada_vestas, pfte.GROUP2, "p90"
+    )
     g3_train = blend_weather("effective_g1_group3_canonical_mix", g3_unison_train, g3_vestas_train, 0.30)
     g3_test = blend_weather("effective_g1_group3_canonical_mix", g3_unison_test, g3_vestas_test, 0.30)
 
@@ -104,9 +110,11 @@ def main():
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
     parser.add_argument("--fold-stats-output", default=DEFAULT_FOLD_OUTPUT)
     parser.add_argument("--years", default="2022,2023,2024")
+    parser.add_argument("--teacher-backend", default=pfte.TEACHER_BACKEND, choices=["rf_oob", "lgbm_time_oof"])
     args = parser.parse_args()
 
     apply_best_scada_teacher_pinn_hparams(pfte)
+    pfte.TEACHER_BACKEND = args.teacher_backend
     years = [int(year.strip()) for year in args.years.split(",") if year.strip()]
     folds = list(combinations(years, len(years) - 1))
     if len(folds) != 3:

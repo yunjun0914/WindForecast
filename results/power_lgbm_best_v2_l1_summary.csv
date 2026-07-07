@@ -1,0 +1,2 @@
+﻿train_policy,model,mean_score,mean_nmae,mean_ficr,worst_fold,std_score,n_folds
+best_lgbm_v2_l1,lgbm_best,0.6236110317160586,0.12850470601206856,0.3757267694441857,0.6066260194456117,0.015178459458178193,3

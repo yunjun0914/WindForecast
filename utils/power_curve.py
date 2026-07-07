@@ -70,3 +70,59 @@ def add_power_curve_feature(df, wind_speed_col, curve_fn, n_turbines, out_col="p
     df = df.copy()
     df[out_col] = curve_fn(df[wind_speed_col].to_numpy()) * n_turbines
     return df
+
+
+def add_power_curve_feature_oof(
+    train_df,
+    pred_df,
+    scada_df,
+    group,
+    wind_speed_col,
+    n_turbines,
+    out_col="power_curve_est",
+    n_splits=5,
+    clean=True,
+):
+    """Add SCADA power-curve feature without giving train rows a fully in-sample curve.
+
+    Train rows are predicted by curves fitted after excluding that row's time fold.
+    Prediction/test rows use the curve fitted on all available train-period SCADA.
+    """
+    train_out = add_power_curve_feature(
+        train_df,
+        wind_speed_col,
+        fit_group_power_curve(scada_df, group, clean=clean),
+        n_turbines,
+        out_col=out_col,
+    )
+    pred_out = add_power_curve_feature(
+        pred_df,
+        wind_speed_col,
+        fit_group_power_curve(scada_df, group, clean=clean),
+        n_turbines,
+        out_col=out_col,
+    )
+
+    if "forecast_kst_dtm" not in train_out.columns or len(train_out) == 0:
+        return train_out, pred_out
+
+    times = pd.to_datetime(train_out["forecast_kst_dtm"]).dt.floor("h")
+    unique_times = np.array(sorted(times.dropna().unique()))
+    n_folds = min(int(n_splits), len(unique_times))
+    if n_folds < 2:
+        return train_out, pred_out
+
+    scada = scada_df.copy()
+    scada["hour"] = pd.to_datetime(scada["kst_dtm"]).dt.floor("h")
+    for fold_times in np.array_split(unique_times, n_folds):
+        fold_mask = times.isin(fold_times)
+        if not bool(fold_mask.any()):
+            continue
+        fit_scada = scada.loc[~scada["hour"].isin(fold_times)].drop(columns=["hour"])
+        if len(fit_scada) == 0:
+            continue
+        curve = fit_group_power_curve(fit_scada, group, clean=clean)
+        train_out.loc[fold_mask, out_col] = (
+            curve(train_out.loc[fold_mask, wind_speed_col].to_numpy()) * n_turbines
+        )
+    return train_out, pred_out
