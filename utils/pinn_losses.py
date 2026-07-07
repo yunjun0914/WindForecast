@@ -84,3 +84,43 @@ def bias_l2(bias_module):
     if bias_module.year_bias is not None:
         out["year"] = bias_module.year_bias.weight.pow(2).mean()
     return out
+
+
+def bias_l1(bias_module):
+    """Diagnostic/regularization helper for sparse train-only bias experiments."""
+    out = {
+        "hod": bias_module.hod_bias.weight.abs().mean(),
+        "moy": bias_module.moy_bias.weight.abs().mean(),
+    }
+    if bias_module.hour_bias is not None:
+        out["hour"] = bias_module.hour_bias.weight.abs().mean()
+    if bias_module.year_bias is not None:
+        out["year"] = bias_module.year_bias.weight.abs().mean()
+    return out
+
+
+def soft_threshold_train_only_hour_bias(bias_module, shrink):
+    """Apply a proximal L1 soft-threshold step only to train-only hour bias weights."""
+    if bias_module.hour_bias is None or shrink <= 0:
+        return
+    with torch.no_grad():
+        weight = bias_module.hour_bias.weight
+        weight.copy_(weight.sign() * torch.clamp(weight.abs() - shrink, min=0.0))
+
+
+def hour_bias_abs_summary(bias_module):
+    if bias_module.hour_bias is None:
+        return {}
+    values = bias_module.hour_bias.weight.detach().abs().flatten().cpu()
+    if values.numel() == 0:
+        return {}
+    return {
+        "mean": values.mean().item(),
+        "p90": values.quantile(0.90).item(),
+        "p99": values.quantile(0.99).item(),
+        "max": values.max().item(),
+        "nz": int((values > 1e-6).sum().item()),
+        "gt_001": int((values > 0.01).sum().item()),
+        "gt_005": int((values > 0.05).sum().item()),
+        "gt_010": int((values > 0.10).sum().item()),
+    }

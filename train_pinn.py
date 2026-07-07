@@ -17,7 +17,16 @@ from utils.pinn_data import (
     fit_scada_wind_teacher,
     fit_wind_speed_correction,
 )
-from utils.pinn_losses import bias_l2, boundary_condition_loss, data_loss, betz_loss, flatness_loss, smoothness_loss
+from utils.pinn_losses import (
+    bias_l2,
+    boundary_condition_loss,
+    data_loss,
+    betz_loss,
+    flatness_loss,
+    hour_bias_abs_summary,
+    smoothness_loss,
+    soft_threshold_train_only_hour_bias,
+)
 from utils.pinn_physics import MANUFACTURER_AREA, SINGLE_TURBINE_CAPACITY_W
 
 VAL_START = "2024-01-01 01:00:00"
@@ -48,6 +57,8 @@ LAMBDA = {
     "hod": 0.001,
     "moy": 0.001,
     "hour": 0.01,
+    "hour_l1": 0.0,
+    "hour_prox_start_epoch": 0,
     "year": 0.01,
 }
 GAMMA = 0.039709016191988696
@@ -101,9 +112,9 @@ def group_prediction(model, df, n_turbines, bias=None, row_idx=None, year_idx=No
         hod_idx = torch.tensor(df["hod"].to_numpy(), dtype=torch.long, device=DEVICE)
         moy_idx = torch.tensor(df["moy"].to_numpy(), dtype=torch.long, device=DEVICE) if USE_MOY_BIAS else None
         p_smoothed = p_smoothed + bias.calendar(hod_idx, moy_idx)
-        if USE_TRAIN_ONLY_HOUR_BIAS and row_idx is not None:
+        if row_idx is not None and getattr(bias, "hour_bias", None) is not None:
             p_smoothed = p_smoothed + bias.train_only(row_idx)
-        if USE_TRAIN_ONLY_YEAR_BIAS and year_idx is not None:
+        if year_idx is not None and getattr(bias, "year_bias", None) is not None:
             p_smoothed = p_smoothed + bias.train_year(year_idx)
     return p_smoothed
 
@@ -278,9 +289,38 @@ def train_manufacturer(
                     bias_breakdown[k] += l_bias[k].item()
         l_data_sum.backward()
         opt2.step()
+        hour_l1 = lam.get("hour_l1", 0.0)
+        hour_prox_start_epoch = int(lam.get("hour_prox_start_epoch", 0))
+        hour_shrink = HOUR_BIAS_LR * hour_l1 if USE_TRAIN_ONLY_HOUR_BIAS and epoch >= hour_prox_start_epoch else 0.0
+        if hour_shrink > 0:
+            for gd in group_data.values():
+                soft_threshold_train_only_hour_bias(gd["bias"], hour_shrink)
         if verbose and (epoch % 100 == 0 or epoch == stage2_epochs - 1):
+            hour_stats = {}
+            if USE_TRAIN_ONLY_HOUR_BIAS:
+                stats = [hour_bias_abs_summary(gd["bias"]) for gd in group_data.values()]
+                if stats and stats[0]:
+                    hour_stats = {
+                        "mean": sum(item["mean"] for item in stats) / len(stats),
+                        "p99": max(item["p99"] for item in stats),
+                        "max": max(item["max"] for item in stats),
+                        "gt_001": sum(item["gt_001"] for item in stats),
+                        "gt_005": sum(item["gt_005"] for item in stats),
+                    }
+            hour_msg = (
+                f" hour_prox_l1={hour_l1:g} shrink={hour_shrink:.6f}"
+                + (
+                    f" hour_abs_mean={hour_stats['mean']:.6f}"
+                    f" hour_abs_p99={hour_stats['p99']:.6f}"
+                    f" hour_abs_max={hour_stats['max']:.6f}"
+                    f" gt001={hour_stats['gt_001']} gt005={hour_stats['gt_005']}"
+                    if hour_stats
+                    else ""
+                )
+            )
             print(
-                f"[{manufacturer}] stage2 epoch {epoch}: data={l_data_sum.item():.4f} "
+                f"[{manufacturer}] stage2 epoch {epoch}: data={l_data_sum.item():.4f}"
+                f"{hour_msg} "
                 f"bias_l2(diag) [{', '.join(f'{k}={v:.6f}' for k, v in bias_breakdown.items())}]"
             )
 
