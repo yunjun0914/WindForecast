@@ -77,12 +77,15 @@ def bias_l2(bias_module):
     shrinkage is applied via AdamW's decoupled weight_decay (see train_pinn.py)."""
     out = {
         "hod": bias_module.hod_bias.weight.pow(2).mean(),
+        "dow": bias_module.dow_bias.weight.pow(2).mean(),
         "moy": bias_module.moy_bias.weight.pow(2).mean(),
     }
     if bias_module.hour_bias is not None:
         out["hour"] = bias_module.hour_bias.weight.pow(2).mean()
     if bias_module.year_bias is not None:
         out["year"] = bias_module.year_bias.weight.pow(2).mean()
+    if getattr(bias_module, "direction", None) is not None:
+        out["wd"] = bias_module.direction.coeff.pow(2).mean()
     return out
 
 
@@ -90,12 +93,15 @@ def bias_l1(bias_module):
     """Diagnostic/regularization helper for sparse train-only bias experiments."""
     out = {
         "hod": bias_module.hod_bias.weight.abs().mean(),
+        "dow": bias_module.dow_bias.weight.abs().mean(),
         "moy": bias_module.moy_bias.weight.abs().mean(),
     }
     if bias_module.hour_bias is not None:
         out["hour"] = bias_module.hour_bias.weight.abs().mean()
     if bias_module.year_bias is not None:
         out["year"] = bias_module.year_bias.weight.abs().mean()
+    if getattr(bias_module, "direction", None) is not None:
+        out["wd"] = bias_module.direction.coeff.abs().mean()
     return out
 
 

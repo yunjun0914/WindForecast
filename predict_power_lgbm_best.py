@@ -8,6 +8,7 @@ from predict_tree_compact_physics_v2 import GROUPS, build_all_meteo_compact_v2
 from utils.metrics import GROUP_CAPACITY_KWH
 from utils.power_curve import GROUP_N_TURBINES, add_power_curve_feature_oof
 from utils.preprocessing import HUB_HEIGHT_PROXY_COL, TIME_KEY_COLS, build_group_dataset
+from utils.scada_direction_features import SCADA_DIRECTION_TARGETS, add_scada_direction_teacher_oof
 
 
 DEFAULT_OUTPUT = "results/submission_tree_lgbm_best_v2_l1.csv"
@@ -50,7 +51,9 @@ def sample_weight(y, group, weight_policy):
     raise ValueError(f"unknown weight_policy: {weight_policy}")
 
 
-def predict_group(train_weather, test_weather, labels, scada, best_row, group):
+def predict_group(train_weather, test_weather, labels, scada, best_row, group, use_scada_wd_teacher=False):
+    if use_scada_wd_teacher:
+        train_weather, test_weather = add_scada_direction_teacher_oof(train_weather, test_weather, scada, group)
     train_weather, test_weather = add_power_curve_feature_oof(
         train_weather,
         test_weather,
@@ -80,6 +83,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--best-csv", default="results/power_lgbm_hyperparams_v2_l1_20_best.csv")
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
+    parser.add_argument("--use-scada-wd-teacher", action="store_true")
     args = parser.parse_args()
 
     best = pd.read_csv(args.best_csv, encoding="utf-8-sig")
@@ -109,7 +113,13 @@ def main():
         train_weather = build_all_meteo_compact_v2(ldaps_train, gfs_train, group)
         test_weather = build_all_meteo_compact_v2(ldaps_test, gfs_test, group)
         pred, n_features, n_train = predict_group(
-            train_weather, test_weather, labels, scada_by_group[group], row.iloc[0], group
+            train_weather,
+            test_weather,
+            labels,
+            scada_by_group[group],
+            row.iloc[0],
+            group,
+            use_scada_wd_teacher=args.use_scada_wd_teacher,
         )
         prediction[group] = pred
         print(f"{group}: train_rows={n_train}, features={n_features}, min={pred.min():.2f}, max={pred.max():.2f}")
@@ -119,6 +129,8 @@ def main():
         raise ValueError("submission has missing predictions")
     prediction.to_csv(args.output, index=False, encoding="utf-8-sig")
     print(f"saved {args.output}: {prediction.shape}")
+    if args.use_scada_wd_teacher:
+        print(f"added wd teacher features: {', '.join(SCADA_DIRECTION_TARGETS)}")
     print(prediction[GROUPS].agg(["min", "max", "mean"]).to_string())
     return prediction
 

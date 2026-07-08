@@ -124,6 +124,7 @@ def build_pinn_weather(ldaps_df, gfs_df=None):
     out["doy"] = out["forecast_kst_dtm"].dt.dayofyear
     out["moy"] = out["forecast_kst_dtm"].dt.month
     out["hod"] = out["forecast_kst_dtm"].dt.hour
+    out["dow"] = out["forecast_kst_dtm"].dt.dayofweek
     if gfs_df is not None:
         gfs_features = _nearest_gfs_features(gfs_df)
         gfs_features["forecast_kst_dtm"] = pd.to_datetime(gfs_features["forecast_kst_dtm"])

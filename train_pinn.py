@@ -36,6 +36,7 @@ STAGE2_EPOCHS = 2000  # bias needs this many epochs (at BIAS_LR=1e-2) to reach a
 LR = 1e-3
 N_COLLOCATION = 2000
 USE_MOY_BIAS = False
+USE_DOW_BIAS = False
 USE_TRAIN_ONLY_HOUR_BIAS = False
 USE_TRAIN_ONLY_YEAR_BIAS = False
 USE_WIND_DISTRIBUTION = {
@@ -44,6 +45,8 @@ USE_WIND_DISTRIBUTION = {
 }
 USE_SCADA_WIND_TEACHER = True
 HONEST_SCADA_TEACHER_HOLDOUT = True
+USE_SCADA_WD_CORRECTION = False
+SCADA_WD_AMPLITUDE = 0.02
 
 # best-known lambdas found via sweep_pinn.py (results/pinn_sweep_results.csv, trial 11)
 # -- hour/day/month dropped (see docs/pinn_plan.md 11.4: measured to actively hurt
@@ -59,6 +62,7 @@ LAMBDA = {
     "hour_l1": 0.0,
     "hour_prox_start_epoch": 0,
     "year": 0.01,
+    "wd": 0.01,
 }
 GAMMA = 0.039709016191988696
 
@@ -67,8 +71,10 @@ GAMMA = 0.039709016191988696
 # keeps the optimizer step size on the same scale as the official normalized error.
 BIAS_LR = 1e-3
 MOY_BIAS_LR = 1e-3
+DOW_BIAS_LR = 1e-3
 HOUR_BIAS_LR = 1e-3
 YEAR_BIAS_LR = 1e-3
+WD_BIAS_LR = 1e-3
 BIAS_EPS = 1e-12
 
 
@@ -101,16 +107,42 @@ def physics_losses(model, v_pool, c_max, turbine_capacity_w, lam):
     return total, breakdown
 
 
-def group_prediction(model, df, n_turbines, bias=None, row_idx=None, year_idx=None, use_wind_distribution=True):
+def group_prediction(
+    model,
+    df,
+    n_turbines,
+    bias=None,
+    row_idx=None,
+    year_idx=None,
+    use_wind_distribution=True,
+    use_calendar_bias=True,
+    use_direction_correction=True,
+):
     cols = ["v", "rho", "doy", "moy"] + (["v_std"] if use_wind_distribution and "v_std" in df.columns else [])
     t = to_device(df, cols)
+    c_eff_add = None
+    if (
+        USE_SCADA_WD_CORRECTION
+        and use_direction_correction
+        and bias is not None
+        and getattr(bias, "direction", None) is not None
+    ):
+        if "scada_wd_sin" not in df.columns or "scada_wd_cos" not in df.columns:
+            raise ValueError("USE_SCADA_WD_CORRECTION=True requires scada_wd_sin/scada_wd_cos columns")
+        wd_sin = torch.tensor(df["scada_wd_sin"].to_numpy(), dtype=torch.float32, device=DEVICE)
+        wd_cos = torch.tensor(df["scada_wd_cos"].to_numpy(), dtype=torch.float32, device=DEVICE)
+        c_eff_add = bias.direction_c_eff(wd_sin, wd_cos)
     p_smoothed = model(
-        t["v"], t["rho"], t["doy"], t["moy"], v_std=t.get("v_std")
+        t["v"], t["rho"], t["doy"], t["moy"], v_std=t.get("v_std"), c_eff_add=c_eff_add
     ) * n_turbines / 1000.0  # W -> kW(h)
     if bias is not None:
-        hod_idx = torch.tensor(df["hod"].to_numpy(), dtype=torch.long, device=DEVICE)
-        moy_idx = torch.tensor(df["moy"].to_numpy(), dtype=torch.long, device=DEVICE) if USE_MOY_BIAS else None
-        p_smoothed = p_smoothed + bias.calendar(hod_idx, moy_idx)
+        if use_calendar_bias:
+            hod_idx = torch.tensor(df["hod"].to_numpy(), dtype=torch.long, device=DEVICE)
+            moy_idx = torch.tensor(df["moy"].to_numpy(), dtype=torch.long, device=DEVICE) if USE_MOY_BIAS else None
+            if USE_DOW_BIAS and "dow" not in df.columns:
+                raise ValueError("USE_DOW_BIAS=True requires a dow column")
+            dow_idx = torch.tensor(df["dow"].to_numpy(), dtype=torch.long, device=DEVICE) if USE_DOW_BIAS else None
+            p_smoothed = p_smoothed + bias.calendar(hod_idx, moy_idx, dow_idx)
         if row_idx is not None and getattr(bias, "hour_bias", None) is not None:
             p_smoothed = p_smoothed + bias.train_only(row_idx)
         if year_idx is not None and getattr(bias, "year_bias", None) is not None:
@@ -122,12 +154,13 @@ def evaluate(model, group_data, use_bias):
     rows = []
     for group, gd in group_data.items():
         with torch.no_grad():
-            bias = gd["bias"] if use_bias else None
+            bias = gd["bias"] if (use_bias or USE_SCADA_WD_CORRECTION) else None
             pred = group_prediction(
                 model,
                 gd["val"],
                 gd["n_turbines"],
                 bias=bias,
+                use_calendar_bias=use_bias,
                 use_wind_distribution=gd["use_wind_distribution"],
             )
             pred = torch.clamp(pred, min=0.0, max=gd["capacity"])
@@ -148,14 +181,17 @@ def train_manufacturer(
     stage2_epochs=STAGE2_EPOCHS,
     verbose=True,
     save=True,
+    model_cls=PowerCurvePINN,
+    model_kwargs=None,
 ):
     lam = LAMBDA if lam is None else lam
+    model_kwargs = {} if model_kwargs is None else model_kwargs
     groups = [g for g, m in GROUP_MANUFACTURER.items() if m == manufacturer]
     area = MANUFACTURER_AREA[manufacturer]
     c_max = C_MAX_BY_MANUFACTURER[manufacturer]
     turbine_capacity_w = SINGLE_TURBINE_CAPACITY_W[manufacturer]
 
-    model = PowerCurvePINN(c_max, area).to(DEVICE)
+    model = model_cls(c_max, area, **model_kwargs).to(DEVICE)
     v_pool = np.concatenate([weather_by_group[group]["v"].to_numpy() for group in groups])
 
     group_data = {}
@@ -171,6 +207,8 @@ def train_manufacturer(
             GROUP_CAPACITY_KWH[group],
             n_train_rows=len(train_df) if USE_TRAIN_ONLY_HOUR_BIAS else None,
             n_train_years=len(train_years) if USE_TRAIN_ONLY_YEAR_BIAS else None,
+            use_direction_correction=USE_SCADA_WD_CORRECTION,
+            direction_amplitude=SCADA_WD_AMPLITUDE,
         ).to(DEVICE)
         group_data[group] = {
             "train": train_df,
@@ -183,29 +221,99 @@ def train_manufacturer(
             "capacity": GROUP_CAPACITY_KWH[group],
         }
 
-    # ---- stage 1: physics backbone only (no bias) ----
-    opt1 = torch.optim.Adam(model.parameters(), lr=LR)
+    # ---- stage 1: physics backbone + optional train-only anomaly bias ----
+    stage1_param_groups = [{"params": list(model.parameters()), "lr": LR, "weight_decay": 0.0}]
+    if USE_TRAIN_ONLY_HOUR_BIAS:
+        stage1_param_groups.append(
+            {
+                "params": [p for gd in group_data.values() for p in gd["bias"].hour_bias.parameters()],
+                "lr": HOUR_BIAS_LR,
+                "eps": BIAS_EPS,
+                "weight_decay": lam["hour"],
+            }
+        )
+    if USE_TRAIN_ONLY_YEAR_BIAS:
+        stage1_param_groups.append(
+            {
+                "params": [p for gd in group_data.values() for p in gd["bias"].year_bias.parameters()],
+                "lr": YEAR_BIAS_LR,
+                "eps": BIAS_EPS,
+                "weight_decay": lam["year"],
+            }
+        )
+    if USE_SCADA_WD_CORRECTION:
+        stage1_param_groups.append(
+            {
+                "params": [
+                    p
+                    for gd in group_data.values()
+                    if gd["bias"].direction is not None
+                    for p in gd["bias"].direction.parameters()
+                ],
+                "lr": WD_BIAS_LR,
+                "eps": BIAS_EPS,
+                "weight_decay": lam.get("wd", 0.01),
+            }
+        )
+    opt1 = torch.optim.Adam(model.parameters(), lr=LR) if len(stage1_param_groups) == 1 else torch.optim.AdamW(stage1_param_groups)
     for epoch in range(stage1_epochs):
         opt1.zero_grad()
         l_phys, phys_breakdown = physics_losses(model, v_pool, c_max, turbine_capacity_w, lam)
         l_data_sum = 0.0
         for group, gd in group_data.items():
             pred = group_prediction(
-                model, gd["train"], gd["n_turbines"], use_wind_distribution=gd["use_wind_distribution"]
+                model,
+                gd["train"],
+                gd["n_turbines"],
+                bias=gd["bias"] if USE_SCADA_WD_CORRECTION else None,
+                use_calendar_bias=False,
+                use_wind_distribution=gd["use_wind_distribution"],
             )
+            if USE_TRAIN_ONLY_HOUR_BIAS:
+                pred = pred + gd["bias"].train_only(gd["train_row_idx"])
+            if USE_TRAIN_ONLY_YEAR_BIAS:
+                pred = pred + gd["bias"].train_year(gd["train_year_idx"])
             y = torch.tensor(gd["train"]["y"].to_numpy(), dtype=torch.float32, device=DEVICE)
             l_data, _, _ = data_loss(y, pred, gd["capacity"], gamma=gamma)
             l_data_sum = l_data_sum + l_data
         loss = l_phys + l_data_sum
         loss.backward()
         opt1.step()
+        hour_l1 = lam.get("hour_l1", 0.0)
+        hour_prox_start_epoch = int(lam.get("hour_prox_start_epoch", 0))
+        hour_shrink = HOUR_BIAS_LR * hour_l1 if USE_TRAIN_ONLY_HOUR_BIAS and epoch >= hour_prox_start_epoch else 0.0
+        if hour_shrink > 0:
+            for gd in group_data.values():
+                soft_threshold_train_only_hour_bias(gd["bias"], hour_shrink)
         if verbose and (epoch % 100 == 0 or epoch == stage1_epochs - 1):
+            hour_stats = {}
+            if USE_TRAIN_ONLY_HOUR_BIAS:
+                stats = [hour_bias_abs_summary(gd["bias"]) for gd in group_data.values()]
+                if stats and stats[0]:
+                    hour_stats = {
+                        "mean": sum(item["mean"] for item in stats) / len(stats),
+                        "p99": max(item["p99"] for item in stats),
+                        "max": max(item["max"] for item in stats),
+                        "gt_001": sum(item["gt_001"] for item in stats),
+                        "gt_005": sum(item["gt_005"] for item in stats),
+                    }
+            hour_msg = (
+                f" hour_prox_l1={hour_l1:g} shrink={hour_shrink:.6f}"
+                + (
+                    f" hour_abs_mean={hour_stats['mean']:.6f}"
+                    f" hour_abs_p99={hour_stats['p99']:.6f}"
+                    f" hour_abs_max={hour_stats['max']:.6f}"
+                    f" gt001={hour_stats['gt_001']} gt005={hour_stats['gt_005']}"
+                    if hour_stats
+                    else ""
+                )
+            )
             print(
                 f"[{manufacturer}] stage1 epoch {epoch}: loss={loss.item():.4f} "
                 f"(data={l_data_sum.item():.4f}, physics={l_phys.item():.4f} "
                 f"[betz={phys_breakdown['betz'].item():.4f} bc={phys_breakdown['bc'].item():.4f} "
                 f"flat={phys_breakdown['flat'].item():.4f} smooth={phys_breakdown['smooth'].item():.4f}]) "
-                f"tau={model.response.tau.item():.3f}"
+                f"tau={model.response.tau.item():.3f}{hour_msg}"
             )
 
     stage1_scores = evaluate(model, group_data, use_bias=False)
@@ -240,22 +348,13 @@ def train_manufacturer(
                 "weight_decay": lam["moy"],
             }
         )
-    if USE_TRAIN_ONLY_HOUR_BIAS:
+    if USE_DOW_BIAS:
         param_groups.append(
             {
-                "params": [p for gd in group_data.values() for p in gd["bias"].hour_bias.parameters()],
-                "lr": HOUR_BIAS_LR,
+                "params": [p for gd in group_data.values() for p in gd["bias"].dow_bias.parameters()],
+                "lr": DOW_BIAS_LR,
                 "eps": BIAS_EPS,
-                "weight_decay": lam["hour"],
-            }
-        )
-    if USE_TRAIN_ONLY_YEAR_BIAS:
-        param_groups.append(
-            {
-                "params": [p for gd in group_data.values() for p in gd["bias"].year_bias.parameters()],
-                "lr": YEAR_BIAS_LR,
-                "eps": BIAS_EPS,
-                "weight_decay": lam["year"],
+                "weight_decay": lam.get("dow", lam["hod"]),
             }
         )
     opt2 = torch.optim.AdamW(param_groups)
@@ -263,20 +362,16 @@ def train_manufacturer(
         opt2.zero_grad()
         l_data_sum = 0.0
         bias_breakdown = {"hod": 0.0}
+        if USE_DOW_BIAS:
+            bias_breakdown["dow"] = 0.0
         if USE_MOY_BIAS:
             bias_breakdown["moy"] = 0.0
-        if USE_TRAIN_ONLY_HOUR_BIAS:
-            bias_breakdown["hour"] = 0.0
-        if USE_TRAIN_ONLY_YEAR_BIAS:
-            bias_breakdown["year"] = 0.0
         for group, gd in group_data.items():
             pred = group_prediction(
                 model,
                 gd["train"],
                 gd["n_turbines"],
                 bias=gd["bias"],
-                row_idx=gd["train_row_idx"],
-                year_idx=gd["train_year_idx"],
                 use_wind_distribution=gd["use_wind_distribution"],
             )
             y = torch.tensor(gd["train"]["y"].to_numpy(), dtype=torch.float32, device=DEVICE)
@@ -288,38 +383,9 @@ def train_manufacturer(
                     bias_breakdown[k] += l_bias[k].item()
         l_data_sum.backward()
         opt2.step()
-        hour_l1 = lam.get("hour_l1", 0.0)
-        hour_prox_start_epoch = int(lam.get("hour_prox_start_epoch", 0))
-        hour_shrink = HOUR_BIAS_LR * hour_l1 if USE_TRAIN_ONLY_HOUR_BIAS and epoch >= hour_prox_start_epoch else 0.0
-        if hour_shrink > 0:
-            for gd in group_data.values():
-                soft_threshold_train_only_hour_bias(gd["bias"], hour_shrink)
         if verbose and (epoch % 100 == 0 or epoch == stage2_epochs - 1):
-            hour_stats = {}
-            if USE_TRAIN_ONLY_HOUR_BIAS:
-                stats = [hour_bias_abs_summary(gd["bias"]) for gd in group_data.values()]
-                if stats and stats[0]:
-                    hour_stats = {
-                        "mean": sum(item["mean"] for item in stats) / len(stats),
-                        "p99": max(item["p99"] for item in stats),
-                        "max": max(item["max"] for item in stats),
-                        "gt_001": sum(item["gt_001"] for item in stats),
-                        "gt_005": sum(item["gt_005"] for item in stats),
-                    }
-            hour_msg = (
-                f" hour_prox_l1={hour_l1:g} shrink={hour_shrink:.6f}"
-                + (
-                    f" hour_abs_mean={hour_stats['mean']:.6f}"
-                    f" hour_abs_p99={hour_stats['p99']:.6f}"
-                    f" hour_abs_max={hour_stats['max']:.6f}"
-                    f" gt001={hour_stats['gt_001']} gt005={hour_stats['gt_005']}"
-                    if hour_stats
-                    else ""
-                )
-            )
             print(
                 f"[{manufacturer}] stage2 epoch {epoch}: data={l_data_sum.item():.4f}"
-                f"{hour_msg} "
                 f"bias_l2(diag) [{', '.join(f'{k}={v:.6f}' for k, v in bias_breakdown.items())}]"
             )
 
@@ -373,12 +439,14 @@ def load_training_data():
 
 
 def run_all_manufacturers(corrected_weather, labels, lam=None, gamma=GAMMA, stage1_epochs=STAGE1_EPOCHS,
-                           stage2_epochs=STAGE2_EPOCHS, verbose=True, save=True):
+                           stage2_epochs=STAGE2_EPOCHS, verbose=True, save=True,
+                           model_cls=PowerCurvePINN, model_kwargs=None):
     all_scores = []
     for manufacturer, weather_by_group in corrected_weather.items():
         _, _, stage1, stage2 = train_manufacturer(
             manufacturer, weather_by_group, labels, lam=lam, gamma=gamma,
             stage1_epochs=stage1_epochs, stage2_epochs=stage2_epochs, verbose=verbose, save=save,
+            model_cls=model_cls, model_kwargs=model_kwargs,
         )
         stage1["stage"] = "physics_only"
         stage2["stage"] = "with_bias"

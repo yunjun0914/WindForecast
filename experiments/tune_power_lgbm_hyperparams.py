@@ -167,6 +167,7 @@ def prepare_fold_cache(groups):
                     "train_years": ",".join(map(str, train_years)),
                     "x_train": train[cols],
                     "y_train": train["target"],
+                    "time_train": train["forecast_kst_dtm"],
                     "x_val": val[cols],
                     "y_val": val["target"],
                     "time_val": val["forecast_kst_dtm"],
