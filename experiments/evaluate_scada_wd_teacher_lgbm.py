@@ -10,14 +10,23 @@ from predict_power_lgbm_best import clean_params, sample_weight
 from predict_tree_compact_physics_v2 import build_all_meteo_compact_v2
 from tune_power_lgbm_hyperparams import filter_scada_years, filter_weather_years, score_one
 from utils.metrics import GROUP_CAPACITY_KWH, TARGET_COLS
+from utils.pinn_effective_pipeline import (
+    SCADA_DIRECTION_TARGETS,
+    SCADA_WS_TARGETS,
+    apply_extended_teacher_crossfit,
+)
 from utils.power_curve import GROUP_N_TURBINES, add_power_curve_feature_oof
 from utils.preprocessing import HUB_HEIGHT_PROXY_COL, TIME_KEY_COLS, build_group_dataset
-from utils.scada_direction_features import SCADA_DIRECTION_TARGETS, add_scada_direction_teacher_oof
 
 
 RESULTS_DIR = Path("results")
 YEARS = [2022, 2023, 2024]
 GROUPS = TARGET_COLS
+TEACHER_V_MODE = {
+    "kpx_group_1": "cubic",
+    "kpx_group_2": "p90",
+    "kpx_group_3": "p90",
+}
 
 
 def load_data():
@@ -50,7 +59,14 @@ def evaluate_variant(group, base_weather, labels, scada_all, best_row, variant):
             continue
 
         if variant == "scada_wd_teacher":
-            train_base, val_base = add_scada_direction_teacher_oof(train_base, val_base, scada, group)
+            train_base, val_base = apply_extended_teacher_crossfit(
+                train_base,
+                val_base,
+                scada,
+                group,
+                TEACHER_V_MODE[group],
+                backend="lgbm_time_oof",
+            )
         elif variant != "baseline":
             raise ValueError(f"unknown variant: {variant}")
 
@@ -161,6 +177,8 @@ def main():
     for group in GROUPS:
         print(f"build all_meteo_compact_v2 {group}")
         feature_cache[group] = build_all_meteo_compact_v2(ldaps, gfs, group)
+        for target in SCADA_WS_TARGETS:
+            target_rows.append({"group": group, "scada_wd_feature": target})
         for target in SCADA_DIRECTION_TARGETS:
             target_rows.append({"group": group, "scada_wd_feature": target})
 
@@ -198,7 +216,7 @@ def main():
     print(overall.to_string(index=False))
     print("\n=== group summary ===")
     print(group_summary.to_string(index=False))
-    print(f"added wd teacher features: {', '.join(SCADA_DIRECTION_TARGETS)}")
+    print(f"added unified SCADA teacher features: {', '.join([*SCADA_WS_TARGETS, *SCADA_DIRECTION_TARGETS])}")
     return overall, group_summary, fold_means
 
 

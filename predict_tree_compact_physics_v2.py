@@ -4,11 +4,10 @@ import numpy as np
 import pandas as pd
 from lightgbm import LGBMRegressor
 
-from utils.compact_physics_features import add_compact_physics_features
-from utils.meteo_features import add_meteo_block, build_meteo_features
 from utils.metrics import GROUP_CAPACITY_KWH
 from utils.power_curve import GROUP_N_TURBINES, add_power_curve_feature_oof
 from utils.preprocessing import HUB_HEIGHT_PROXY_COL, TIME_KEY_COLS, build_group_dataset, build_weather_features
+from utils.tree_feature_profiles import FEATURE_PROFILE_FULL_V2, FEATURE_PROFILES, build_tree_features
 
 
 DEFAULT_OUTPUT = "results/submission_tree_all_meteo_compact_v2_lgbm.csv"
@@ -32,10 +31,11 @@ def fit_lgbm():
 
 
 def build_all_meteo_compact_v2(ldaps, gfs, group):
-    base = build_weather_features(ldaps, gfs)
-    meteo = build_meteo_features(ldaps, gfs)
-    all_meteo = add_meteo_block(base, meteo, "all_meteo")
-    return add_compact_physics_features(all_meteo, ldaps, gfs, group=group, include_advanced=True)
+    return build_tree_feature_profile(ldaps, gfs, group, feature_profile=FEATURE_PROFILE_FULL_V2)
+
+
+def build_tree_feature_profile(ldaps, gfs, group, feature_profile=FEATURE_PROFILE_FULL_V2):
+    return build_tree_features(ldaps, gfs, group, feature_profile=feature_profile)
 
 
 def predict_group(train_weather, test_weather, labels, scada, group):
@@ -62,6 +62,7 @@ def predict_group(train_weather, test_weather, labels, scada, group):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
+    parser.add_argument("--feature-profile", default=FEATURE_PROFILE_FULL_V2, choices=FEATURE_PROFILES)
     args = parser.parse_args()
 
     ldaps_train = pd.read_csv("data/train/ldaps_train.csv", encoding="utf-8-sig")
@@ -85,8 +86,8 @@ def main():
 
     for group in GROUPS:
         print(f"build features and fit {group}")
-        train_weather = build_all_meteo_compact_v2(ldaps_train, gfs_train, group)
-        test_weather = build_all_meteo_compact_v2(ldaps_test, gfs_test, group)
+        train_weather = build_tree_feature_profile(ldaps_train, gfs_train, group, args.feature_profile)
+        test_weather = build_tree_feature_profile(ldaps_test, gfs_test, group, args.feature_profile)
         pred, n_features, n_train = predict_group(train_weather, test_weather, labels, scada_by_group[group], group)
         prediction[group] = pred
         print(f"{group}: train_rows={n_train}, features={n_features}, min={pred.min():.2f}, max={pred.max():.2f}")

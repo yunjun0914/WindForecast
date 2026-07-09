@@ -18,7 +18,6 @@ from utils.pinn_effective_pipeline import (
     filter_label_years,
     filter_scada_years,
 )
-from utils.scada_direction_features import add_scada_direction_teacher_oof
 from utils.pinn_scada_teacher_config import apply_best_scada_teacher_pinn_hparams
 
 
@@ -72,15 +71,6 @@ def build_weather_for_fold(train_years, pred_year):
     g3_vestas_train, g3_vestas_pred = teacher_train_pred(
         canonical_train, canonical_pred, scada_vestas, GROUP2, "p90"
     )
-    if pfte.USE_SCADA_WD_CORRECTION:
-        g1_train, g1_pred = add_scada_direction_teacher_oof(g1_train, g1_pred, scada_vestas, GROUP1)
-        g2_train, g2_pred = add_scada_direction_teacher_oof(g2_train, g2_pred, scada_vestas, GROUP2)
-        g3_unison_train, g3_unison_pred = add_scada_direction_teacher_oof(
-            g3_unison_train, g3_unison_pred, scada_unison, GROUP3
-        )
-        g3_vestas_train, g3_vestas_pred = add_scada_direction_teacher_oof(
-            g3_vestas_train, g3_vestas_pred, scada_vestas, GROUP2
-        )
     g3_train = blend_weather("effective_g1_group3_canonical_mix", g3_unison_train, g3_vestas_train, 0.30)
     g3_pred = blend_weather("effective_g1_group3_canonical_mix", g3_unison_pred, g3_vestas_pred, 0.30)
 

@@ -2,6 +2,211 @@
 
 작성일: 2026-07-08 00:46:07 +09:00
 
+## Log Entries
+
+### 2026-07-09 04:09:49 +09:00 - PINN + TREE + TCN family OOF blend
+
+목적: PINN, TREE, TCN family를 같은 OOF 기준에서 3-branch로 섞어 상호보완이 있는지 확인한다.
+
+고정:
+
+- TCN family: W24 `0.30`, W72 `0.40`, W168 `0.30`
+- branch weight grid: `0.05`
+- validation: leave-one-year-out OOF
+- test submission 생성 없음
+
+결과:
+
+| Variant | Mean score | Mean nMAE | Mean FICR | Worst fold |
+|---|---:|---:|---:|---:|
+| TREE only | `0.62396` | `0.12809` | `0.37602` | `0.60563` |
+| TCN family only | `0.62084` | `0.13797` | `0.37966` | `0.61141` |
+| PINN only | `0.61293` | `0.14197` | `0.36783` | `0.60596` |
+| PINN `0.25` + TREE `0.40` + TCN family `0.35` | `0.63088` | `0.12760` | `0.38937` | `0.61667` |
+
+판단: 3-branch ensemble은 유효하다. TREE only 대비 `+0.00692`, 기존 TCN W72 best blend `0.63021` 대비 `+0.00068`. FICR 상승이 크지만 group3는 여전히 약점이라 추가 개선은 group3 데이터/teacher/feature 쪽이 필요하다.
+
+문서:
+
+- `docs/pinn_tree_tcn_family_oof_blend.md`
+
+### 2026-07-09 03:58:29 +09:00 - TCN window comparison W24/W72/W168
+
+목적: TCN branch가 window 길이에 대해 일관적으로 유효한지 확인한다.
+
+고정:
+
+- model: TCN, 4 layers, hidden 64, kernel 3
+- input features: 34
+- validation: leave-one-year-out OOF
+- TREE base: `aggressive_minimal_rolling_v1`
+- test submission 생성 없음
+
+결과:
+
+| Model | Single score | Best TREE+TCN score | Best weight |
+|---|---:|---:|---:|
+| TCN W24 | `0.61415` | `0.62775` | `0.30` |
+| TCN W72 | `0.61521` | `0.63021` | `0.40` |
+| TCN W168 | `0.61220` | `0.62876` | `0.30` |
+
+판단: TCN family는 일관적으로 유효하다. W72가 단독/블렌드 기준 best. W168은 lower residual correlation이지만 품질이 낮아 W72를 넘지 못함. 다음 후보는 W72 TCN seed bagging/light tuning 또는 W72/W168 TCN ensemble.
+
+문서:
+
+- `docs/seqnn_tcn_window_comparison.md`
+
+### 2026-07-09 03:48:27 +09:00 - SeqNN mid TCN W72 v1 OOF
+
+목적: 최근 72시간 weather sequence를 TCN으로 보면서 short GRU보다 더 넓은 ramp/weather pattern 신호가 있는지 확인한다.
+
+고정:
+
+- 기존 PINN/TREE 제출 경로 변경 없음
+- test submission 생성 없음
+- validation: leave-one-year-out OOF
+- target history/raw SCADA feature 금지
+- early stopping 사용
+
+결과:
+
+| Variant | Mean score | Mean nMAE | Mean FICR | Worst fold |
+|---|---:|---:|---:|---:|
+| TREE rolling baseline | `0.62396` | `0.12809` | `0.37602` | `0.60563` |
+| SeqNN mid TCN W72 | `0.61521` | `0.14078` | `0.37120` | `0.60283` |
+| TREE 60% + TCN 40% | `0.63021` | `0.12714` | `0.38756` | `0.61593` |
+
+판단: 현재 SeqNN 후보 중 가장 유망하다. TREE blend에서 `+0.00624`, 모든 group 개선, FICR 개선이 크다. test submission은 아직 만들지 않고 TCN seed/tuning 또는 PINN/TREE/TCN OOF blend를 다음 후보로 둔다.
+
+문서:
+
+- `docs/seqnn_mid_tcn_w72_v1.md`
+
+### 2026-07-09 03:35:28 +09:00 - SeqNN long DLinear W168 v1 OOF
+
+목적: 최근 168시간 weather sequence를 보는 long-window branch가 TREE와 다른 long-term regime 신호를 주는지 확인한다.
+
+고정:
+
+- 기존 PINN/TREE 제출 경로 변경 없음
+- test submission 생성 없음
+- validation: leave-one-year-out OOF
+- target history/raw SCADA feature 금지
+- early stopping 사용
+
+결과:
+
+| Variant | Mean score | Mean nMAE | Mean FICR | Worst fold |
+|---|---:|---:|---:|---:|
+| TREE rolling baseline | `0.62396` | `0.12809` | `0.37602` | `0.60563` |
+| SeqNN long DLinear W168 | `0.54953` | `0.17689` | `0.27595` | `0.53806` |
+| TREE 95% + DLinear 5% | `0.62387` | `0.12798` | `0.37572` | `0.60573` |
+
+판단: residual correlation은 lower overall `0.68020`이지만 단독 품질이 너무 낮아 blend에 도움이 안 된다. DLinear W168 v1은 기각. long-window 아이디어는 GRU/TCN 또는 shared model로 재검토.
+
+문서:
+
+- `docs/seqnn_long_dlinear_w168_v1.md`
+
+### 2026-07-09 03:28:12 +09:00 - SeqNN short GRU W24 v1 OOF
+
+목적: 최근 24시간 weather sequence를 직접 보는 GRU branch가 TREE와 다른 예측 신호를 주는지 확인한다.
+
+고정:
+
+- 기존 PINN/TREE 제출 경로 변경 없음
+- test submission 생성 없음
+- validation: leave-one-year-out OOF
+- target history/raw SCADA feature 금지
+- early stopping 사용
+
+결과:
+
+| Variant | Mean score | Mean nMAE | Mean FICR | Worst fold |
+|---|---:|---:|---:|---:|
+| TREE rolling baseline | `0.62396` | `0.12809` | `0.37602` | `0.60563` |
+| SeqNN short GRU W24 | `0.61323` | `0.13700` | `0.36347` | `0.59955` |
+| TREE 70% + SeqNN 30% | `0.62768` | `0.12571` | `0.38107` | `0.60973` |
+
+판단: SeqNN 단독은 약하지만 TREE blend에서 `+0.00372`가 나왔다. 모든 group이 소폭 개선했다. residual correlation은 높으므로 바로 제출하지 말고 PINN/TREE/SeqNN 3-branch OOF blend와 long-window branch를 다음 후보로 본다.
+
+문서:
+
+- `docs/seqnn_short_gru_w24_v1.md`
+
+### 2026-07-09 02:02:30 +09:00 - model branch comparison plan
+
+목적: TREE만 강화하지 않고, short/long window SeqNN branch를 PINN/TREE와 같은 OOF 기준으로 비교하는 계획을 고정한다.
+
+결정:
+
+- 현재 위치: Phase 4B, model branch comparison
+- TREE 기준: `aggressive_minimal_rolling_v1`
+- SeqNN은 residual이 아니라 direct forecast sibling
+- short window: 24h GRU/TCN, ramp/FICR 목적
+- long window: 168h DLinear/GRU, NMAE/generalization 목적
+- 입력 feature는 20-40개 small set으로 시작
+- test submission은 만들지 않음
+
+문서:
+
+- `docs/model_branch_comparison_plan.md`
+
+다음 권장 구현: `seqnn_short_gru_w24_v1` OOF.
+
+### 2026-07-09 01:50:58 +09:00 - TREE context profile: lead/cycle + direction + spatial
+
+목적: 대회/연구 코드에서 남은 후보 1/3/4를 rolling profile 위에 compact하게 추가한다.
+
+고정:
+
+- 모델: tuned group LGBM v2
+- 검증: year OOF
+- 제출: 생성하지 않음
+- 기존 `aggressive_minimal_rolling_v1` 유지
+
+변경:
+
+- 새 profile: `aggressive_minimal_context_v1`
+- feature count: `211`
+- 추가 family: forecast lead/cycle, normalized direction/veer, compact spatial q25/q75/IQR/std
+
+결과:
+
+| Model | Feature count | Mean score | Mean nMAE | Mean FICR | Worst fold |
+|---|---:|---:|---:|---:|---:|
+| aggressive_minimal_rolling_v1 TREE | 160 | `0.62396` | `0.12809` | `0.37602` | `0.60563` |
+| aggressive_minimal_context_v1 TREE | 211 | `0.62343` | `0.12794` | `0.37481` | `0.60494` |
+
+판단: NMAE는 좋아졌지만 FICR이 하락했다. 세 family를 한번에 붙이는 방식은 제출 후보가 아니며, 다음에는 lead/cycle, direction, spatial을 분리 ablation해야 한다.
+
+### 2026-07-09 01:39:51 +09:00 - TREE rolling time-context profile
+
+목적: 외부 대회/연구 코드에서 반복되는 weather lag/lead/rolling feature를 70개 minimal TREE profile 위에 추가한다.
+
+고정:
+
+- 모델: tuned group LGBM v2
+- 검증: year OOF
+- 제출: 생성하지 않음
+- 기존 `full_v2`, `aggressive_minimal_v1` 유지
+
+변경:
+
+- 새 profile: `aggressive_minimal_rolling_v1`
+- feature count: `160`
+- 추가 family: 주요 wind/weather `lag1/lag3/lead1/lead3/roll3/roll6`
+
+결과:
+
+| Model | Feature count | Mean score | Mean nMAE | Mean FICR | Worst fold |
+|---|---:|---:|---:|---:|---:|
+| aggressive_minimal_v1 TREE | 70 | `0.62085` | `0.12980` | `0.37150` | `0.60369` |
+| aggressive_minimal_rolling_v1 TREE | 160 | `0.62396` | `0.12809` | `0.37602` | `0.60563` |
+| full_v2 TREE | 511 | `0.62361` | `0.12851` | `0.37573` | - |
+
+판단: rolling family는 유효하다. 큰 점프는 아니지만 minimal profile의 약점을 메우며 full feature control보다도 소폭 좋다. test submission은 만들지 않는다.
+
 실험명: repository cleanup and main pipeline reset
 
 ## Current Main Pipeline
@@ -121,6 +326,25 @@ Submission rule:
 - Do not create new test submission unless validation improves by roughly `+0.01` or more, or the user explicitly asks for a diagnostic submission.
 
 ## Log Entries
+
+작성일: 2026-07-09 01:19:50 +09:00
+
+실험명: aggressive minimal TREE feature profile (`aggressive_minimal_v1`)
+
+목적: 기존 TREE 511개 feature를 대회 코드 스타일에 맞춰 70개로 축소. 기존 tuned LGBM hyperparameter는 고정하고 feature profile만 변경.
+
+결과:
+
+| Model | Feature count | Mean score | Mean nMAE | Mean FICR | Worst fold |
+|---|---:|---:|---:|---:|---:|
+| full_v2 TREE | 511 | `0.62361` | `0.12851` | `0.37573` | - |
+| aggressive_minimal_v1 TREE | 70 | `0.62085` | `0.12980` | `0.37150` | `0.60369` |
+
+판단: 하락폭 약 `-0.00276`으로 허용 기준 `-0.005` 이내. 제출 후보는 아니지만 관리 가능한 feature 기준점으로 유지. 다음 feature 실험은 70개 profile 위에서 direction-conditioned wind 또는 SCADA availability weighting처럼 큰 구조 후보를 붙이는 방향이 좋음.
+
+출력: `results/power_lgbm_best_v2_l1_aggressive_minimal_v1_*`, `results/standard_oof_tree_lgbm_best_v2_l1_aggressive_minimal_v1.csv`
+
+---
 
 작성일: 2026-07-08 10:26:03 +09:00
 

@@ -8,6 +8,7 @@ from lightgbm import LGBMRegressor
 import _bootstrap  # noqa: F401
 from tune_power_lgbm_hyperparams import parse_list, prepare_fold_cache, sample_weight, score_one
 from utils.metrics import TARGET_COLS
+from utils.tree_feature_profiles import FEATURE_PROFILE_FULL_V2, FEATURE_PROFILES
 
 
 RESULTS_DIR = Path("results")
@@ -44,12 +45,13 @@ def main():
     parser.add_argument("--groups", default=",".join(TARGET_COLS))
     parser.add_argument("--stem", default="power_lgbm_best_v2_l1")
     parser.add_argument("--train-policy-name", default="best_lgbm_v2_l1")
+    parser.add_argument("--feature-profile", default=FEATURE_PROFILE_FULL_V2, choices=FEATURE_PROFILES)
     args = parser.parse_args()
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     groups = parse_list(args.groups)
     best = pd.read_csv(args.best_csv, encoding="utf-8-sig")
-    cache = prepare_fold_cache(groups)
+    cache = prepare_fold_cache(groups, feature_profile=args.feature_profile)
 
     score_rows = []
     pred_rows = []
@@ -85,6 +87,7 @@ def main():
                     "train_years": fold["train_years"],
                     "train_policy": args.train_policy_name,
                     "model": "lgbm_best",
+                    "feature_profile": args.feature_profile,
                     "group": group,
                     "score": score,
                     "nmae": nmae,
@@ -102,6 +105,7 @@ def main():
                         "train_years": fold["train_years"],
                         "train_policy": args.train_policy_name,
                         "model": "lgbm_best",
+                        "feature_profile": args.feature_profile,
                         "group": group,
                         "actual": fold["y_val"].to_numpy(float),
                         "pred": pred,
@@ -113,7 +117,7 @@ def main():
     scores = pd.DataFrame(score_rows)
     predictions = pd.concat(pred_rows, ignore_index=True) if pred_rows else pd.DataFrame()
     means = (
-        scores.groupby(["pred_year", "train_policy", "model"], as_index=False)
+        scores.groupby(["pred_year", "train_policy", "model", "feature_profile"], as_index=False)
         .agg(score=("score", "mean"), nmae=("nmae", "mean"), ficr=("ficr", "mean"), n=("n", "sum"))
     )
     means["group"] = "fold_mean"
@@ -123,7 +127,7 @@ def main():
     scores = pd.concat([scores, means[scores.columns]], ignore_index=True)
     summary = (
         scores[scores["group"] == "fold_mean"]
-        .groupby(["train_policy", "model"], as_index=False)
+        .groupby(["train_policy", "model", "feature_profile"], as_index=False)
         .agg(
             mean_score=("score", "mean"),
             mean_nmae=("nmae", "mean"),

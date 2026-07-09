@@ -4,14 +4,24 @@ import numpy as np
 import pandas as pd
 from lightgbm import LGBMRegressor
 
-from predict_tree_compact_physics_v2 import GROUPS, build_all_meteo_compact_v2
+from predict_tree_compact_physics_v2 import GROUPS, build_tree_feature_profile
 from utils.metrics import GROUP_CAPACITY_KWH
+from utils.pinn_effective_pipeline import (
+    SCADA_DIRECTION_TARGETS,
+    SCADA_WS_TARGETS,
+    apply_extended_teacher_crossfit,
+)
 from utils.power_curve import GROUP_N_TURBINES, add_power_curve_feature_oof
 from utils.preprocessing import HUB_HEIGHT_PROXY_COL, TIME_KEY_COLS, build_group_dataset
-from utils.scada_direction_features import SCADA_DIRECTION_TARGETS, add_scada_direction_teacher_oof
+from utils.tree_feature_profiles import FEATURE_PROFILE_FULL_V2, FEATURE_PROFILES
 
 
 DEFAULT_OUTPUT = "results/submission_tree_lgbm_best_v2_l1.csv"
+TEACHER_V_MODE = {
+    "kpx_group_1": "cubic",
+    "kpx_group_2": "p90",
+    "kpx_group_3": "p90",
+}
 PARAM_COLS = [
     "random_state",
     "n_jobs",
@@ -51,9 +61,25 @@ def sample_weight(y, group, weight_policy):
     raise ValueError(f"unknown weight_policy: {weight_policy}")
 
 
-def predict_group(train_weather, test_weather, labels, scada, best_row, group, use_scada_wd_teacher=False):
+def predict_group(
+    train_weather,
+    test_weather,
+    labels,
+    scada,
+    best_row,
+    group,
+    use_scada_wd_teacher=False,
+    scada_teacher_backend="lgbm_time_oof",
+):
     if use_scada_wd_teacher:
-        train_weather, test_weather = add_scada_direction_teacher_oof(train_weather, test_weather, scada, group)
+        train_weather, test_weather = apply_extended_teacher_crossfit(
+            train_weather,
+            test_weather,
+            scada,
+            group,
+            TEACHER_V_MODE[group],
+            backend=scada_teacher_backend,
+        )
     train_weather, test_weather = add_power_curve_feature_oof(
         train_weather,
         test_weather,
@@ -83,7 +109,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--best-csv", default="results/power_lgbm_hyperparams_v2_l1_20_best.csv")
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
+    parser.add_argument("--feature-profile", default=FEATURE_PROFILE_FULL_V2, choices=FEATURE_PROFILES)
     parser.add_argument("--use-scada-wd-teacher", action="store_true")
+    parser.add_argument("--scada-teacher-backend", default="lgbm_time_oof", choices=["rf_oob", "lgbm_time_oof"])
     args = parser.parse_args()
 
     best = pd.read_csv(args.best_csv, encoding="utf-8-sig")
@@ -109,9 +137,9 @@ def main():
         row = best[best["group"] == group]
         if row.empty:
             raise ValueError(f"missing best params for {group}")
-        print(f"build features and fit tuned LGBM {group}")
-        train_weather = build_all_meteo_compact_v2(ldaps_train, gfs_train, group)
-        test_weather = build_all_meteo_compact_v2(ldaps_test, gfs_test, group)
+        print(f"build features and fit tuned LGBM {group}: profile={args.feature_profile}")
+        train_weather = build_tree_feature_profile(ldaps_train, gfs_train, group, args.feature_profile)
+        test_weather = build_tree_feature_profile(ldaps_test, gfs_test, group, args.feature_profile)
         pred, n_features, n_train = predict_group(
             train_weather,
             test_weather,
@@ -120,6 +148,7 @@ def main():
             row.iloc[0],
             group,
             use_scada_wd_teacher=args.use_scada_wd_teacher,
+            scada_teacher_backend=args.scada_teacher_backend,
         )
         prediction[group] = pred
         print(f"{group}: train_rows={n_train}, features={n_features}, min={pred.min():.2f}, max={pred.max():.2f}")
@@ -130,7 +159,7 @@ def main():
     prediction.to_csv(args.output, index=False, encoding="utf-8-sig")
     print(f"saved {args.output}: {prediction.shape}")
     if args.use_scada_wd_teacher:
-        print(f"added wd teacher features: {', '.join(SCADA_DIRECTION_TARGETS)}")
+        print(f"added unified SCADA teacher features: {', '.join([*SCADA_WS_TARGETS, *SCADA_DIRECTION_TARGETS])}")
     print(prediction[GROUPS].agg(["min", "max", "mean"]).to_string())
     return prediction
 

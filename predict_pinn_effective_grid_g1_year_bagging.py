@@ -17,7 +17,6 @@ from utils.pinn_effective_pipeline import (
     filter_label_years,
     filter_scada_years,
 )
-from utils.scada_direction_features import add_scada_direction_teacher_oof
 from utils.pinn_scada_teacher_config import apply_best_scada_teacher_pinn_hparams
 
 
@@ -45,19 +44,6 @@ def teacher_train_valid_test(weather_train, weather_valid, weather_test, scada_d
     valid_len = len(weather_valid)
     pred_weather = pd.concat([weather_valid, weather_test], ignore_index=True)
     train_teacher, pred_teacher = teacher_train_test(weather_train, pred_weather, scada_df, group, v_mode)
-    valid_teacher = pred_teacher.iloc[:valid_len].reset_index(drop=True)
-    test_teacher = pred_teacher.iloc[valid_len:].reset_index(drop=True)
-    return train_teacher, valid_teacher, test_teacher
-
-
-def wd_teacher_train_valid_test(weather_train, weather_valid, weather_test, scada_df, group):
-    if weather_valid is None:
-        train_teacher, test_teacher = add_scada_direction_teacher_oof(weather_train, weather_test, scada_df, group)
-        return train_teacher, None, test_teacher
-
-    valid_len = len(weather_valid)
-    pred_weather = pd.concat([weather_valid, weather_test], ignore_index=True)
-    train_teacher, pred_teacher = add_scada_direction_teacher_oof(weather_train, pred_weather, scada_df, group)
     valid_teacher = pred_teacher.iloc[:valid_len].reset_index(drop=True)
     test_teacher = pred_teacher.iloc[valid_len:].reset_index(drop=True)
     return train_teacher, valid_teacher, test_teacher
@@ -118,19 +104,6 @@ def build_weather_for_years(train_years, valid_year=None):
         pfte.GROUP2,
         "p90",
     )
-    if pfte.USE_SCADA_WD_CORRECTION:
-        g1_train, g1_valid, g1_test = wd_teacher_train_valid_test(
-            g1_train, g1_valid, g1_test, scada_vestas, pfte.GROUP1
-        )
-        g2_train, g2_valid, g2_test = wd_teacher_train_valid_test(
-            g2_train, g2_valid, g2_test, scada_vestas, pfte.GROUP2
-        )
-        g3_unison_train, g3_unison_valid, g3_unison_test = wd_teacher_train_valid_test(
-            g3_unison_train, g3_unison_valid, g3_unison_test, scada_unison, pfte.GROUP3
-        )
-        g3_vestas_train, g3_vestas_valid, g3_vestas_test = wd_teacher_train_valid_test(
-            g3_vestas_train, g3_vestas_valid, g3_vestas_test, scada_vestas, pfte.GROUP2
-        )
     g3_train = blend_weather("effective_g1_group3_canonical_mix", g3_unison_train, g3_vestas_train, 0.30)
     g3_test = blend_weather("effective_g1_group3_canonical_mix", g3_unison_test, g3_vestas_test, 0.30)
     if valid_year is not None:

@@ -6,10 +6,10 @@ import pandas as pd
 from lightgbm import LGBMRegressor
 
 import _bootstrap  # noqa: F401
-from predict_tree_compact_physics_v2 import build_all_meteo_compact_v2
 from utils.metrics import GROUP_CAPACITY_KWH, TARGET_COLS, group_nmae_ficr
 from utils.power_curve import GROUP_N_TURBINES, add_power_curve_feature_oof
 from utils.preprocessing import HUB_HEIGHT_PROXY_COL, TIME_KEY_COLS
+from utils.tree_feature_profiles import FEATURE_PROFILE_FULL_V2, FEATURE_PROFILES, build_tree_features
 
 
 RESULTS_DIR = Path("results")
@@ -118,7 +118,7 @@ def sample_weight(y, group, weight_policy):
     raise ValueError(f"unknown weight_policy: {weight_policy}")
 
 
-def prepare_fold_cache(groups):
+def prepare_fold_cache(groups, feature_profile=FEATURE_PROFILE_FULL_V2):
     ldaps = pd.read_csv("data/train/ldaps_train.csv", encoding="utf-8-sig")
     gfs = pd.read_csv("data/train/gfs_train.csv", encoding="utf-8-sig")
     labels = pd.read_csv("data/train/train_labels.csv", encoding="utf-8-sig")
@@ -133,8 +133,8 @@ def prepare_fold_cache(groups):
 
     feature_cache = {}
     for group in groups:
-        print(f"build all_meteo_compact_v2 {group}")
-        feature_cache[group] = build_all_meteo_compact_v2(ldaps, gfs, group)
+        print(f"build tree features {group}: profile={feature_profile}")
+        feature_cache[group] = build_tree_features(ldaps, gfs, group, feature_profile=feature_profile)
 
     cache = {}
     for group in groups:
@@ -212,11 +212,12 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--search-space", default="broad", choices=["broad", "focused_l1"])
     parser.add_argument("--stem", default="power_lgbm_hyperparams")
+    parser.add_argument("--feature-profile", default=FEATURE_PROFILE_FULL_V2, choices=FEATURE_PROFILES)
     args = parser.parse_args()
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     groups = parse_list(args.groups)
-    cache = prepare_fold_cache(groups)
+    cache = prepare_fold_cache(groups, feature_profile=args.feature_profile)
     rng = np.random.default_rng(args.seed)
 
     trial_rows = []

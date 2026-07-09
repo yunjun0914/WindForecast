@@ -36,6 +36,7 @@ from utils.pinn_losses import bias_l2, data_loss, hour_bias_abs_summary, soft_th
 from utils.pinn_physics import MANUFACTURER_AREA, SINGLE_TURBINE_CAPACITY_W
 from utils.power_curve import GROUP_TURBINE_PREFIXES
 from utils.preprocessing import TIME_KEY_COLS
+from utils.scada_direction_features import SCADA_DIRECTION_TARGETS, build_scada_direction_targets
 
 
 GROUP1 = "kpx_group_1"
@@ -51,7 +52,7 @@ STAGE1_PATIENCE = 12
 STAGE2_EVAL_INTERVAL = 50
 STAGE2_PATIENCE = 10
 
-EXT_TARGETS = [
+SCADA_WS_TARGETS = [
     "scada_ws_mean",
     "scada_ws_std",
     "scada_ws_p10",
@@ -62,6 +63,7 @@ EXT_TARGETS = [
     "scada_ws_cubic",
     "scada_ws_ramp",
 ]
+EXT_TARGETS = [*SCADA_WS_TARGETS, *SCADA_DIRECTION_TARGETS]
 
 
 def seed_everything(seed=42):
@@ -147,6 +149,9 @@ def build_extended_scada_targets(scada_df, group):
     out["scada_ws_max"] = np.nanmax(values, axis=1)
     out["scada_ws_cubic"] = np.cbrt(np.nanmean(np.clip(values, 0, None) ** 3, axis=1))
     out["scada_ws_ramp"] = out["scada_ws_mean"].diff().fillna(0)
+    direction = build_scada_direction_targets(scada_df, group)
+    if not direction.empty:
+        out = out.merge(direction, on="forecast_kst_dtm", how="inner")
     return out.replace([np.inf, -np.inf], np.nan).dropna().reset_index(drop=True)
 
 
@@ -189,8 +194,14 @@ def _make_lgbm_teacher(seed=42):
 def _apply_extended_teacher_predictions(weather, pred, v_mode):
     out = weather.copy()
     pred = pd.DataFrame(pred, columns=EXT_TARGETS, index=out.index)
-    for col in EXT_TARGETS:
+    for col in SCADA_WS_TARGETS:
         out[col] = np.clip(pred[col], 0, None)
+    for col in ["scada_wd_sin", "scada_wd_cos"]:
+        out[col] = np.clip(pred[col], -1.0, 1.0)
+    for col in ["scada_wd_concentration", "scada_wd_spread", "scada_wd_sin_std", "scada_wd_cos_std"]:
+        out[col] = np.clip(pred[col], 0.0, 1.0)
+    for col in ["scada_ws_dir_sin", "scada_ws_dir_cos"]:
+        out[col] = np.clip(pred[col], -40.0, 40.0)
 
     if v_mode == "mean":
         v = out["scada_ws_mean"]
@@ -208,7 +219,7 @@ def _apply_extended_teacher_predictions(weather, pred, v_mode):
     spread_sigma = (out["scada_ws_p90"] - out["scada_ws_p10"]) / 2.563
     out["v"] = np.clip(v, 0, None)
     out["v_std"] = np.clip(0.5 * out["scada_ws_std"] + 0.5 * spread_sigma, 0.05, None)
-    return out
+    return out.replace([np.inf, -np.inf], np.nan).ffill().bfill().fillna(0.0)
 
 
 def apply_extended_teacher(weather, teacher, v_mode):
