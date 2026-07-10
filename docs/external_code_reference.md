@@ -112,7 +112,7 @@ KDD GNN 계열은 터빈 위치 또는 출력 유사도로 graph를 만든다.
 
 우리 기준 설계 원칙:
 
-- 기본 blend 비율은 사용자가 명시하기 전까지 `PINN 50 : TREE 50`을 유지한다.
+- 기본 blend 비율은 사용자가 명시하기 전까지 `docs/best_model_usage.md`의 current public best 기준을 유지한다.
 - 새 NN 후보는 먼저 OOF valid에서 단독 성능과 PINN/TREE 상관관계를 확인한다.
 - residual correction은 마지막 후보정 단계로 둔다.
 
@@ -259,7 +259,7 @@ OpenOA/FLORIS/PyWake에서 반복되는 물리 변수:
 7. 위험
 8. 생성 파일
 
-큰 폭 개선 후보가 아닌 경우 test submission은 만들지 않는다. 기본 앙상블 비율은 사용자가 바꾸라고 하기 전까지 `PINN 50 : TREE 50`으로 둔다.
+큰 폭 개선 후보가 아닌 경우 test submission은 만들지 않는다. 기본 앙상블 비율은 사용자가 바꾸라고 하기 전까지 `docs/best_model_usage.md`의 current public best 기준으로 둔다.
 
 ## 다음에 다시 볼 코드 포인트
 

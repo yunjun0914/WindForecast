@@ -1,285 +1,314 @@
-# Best Model Usage And Handoff
+# Best Model Usage And Reproduction
 
-작성일: 2026-07-10 KST
+Updated: 2026-07-11 KST
 
-이 문서는 새 Codex 세션이나 외부 리뷰어에게 현재 최고 public 모델을 빠르게 인수인계하기 위한 문서다. 실험 로그가 아니라 **현재 최고 제출을 어떻게 이해하고 재현하는지**에 초점을 둔다.
+This document is the source of truth for the current public-best submission, how to rebuild it from existing branch files, and how to regenerate the branch files from scratch.
 
-## 1. 현재 최고 기준
+## Current Public Best
 
 | Item | Value |
 |---|---|
-| Best file | `results/submission_pinn25_tree40_tcn35_tree_g3_vestas_pseudo2022_w010.csv` |
-| Public score | `0.6370788926` |
-| Public 1-nMAE | `0.8701764551` |
-| Public FiCR | `0.4039813302` |
-| Memo | `pinn25_tree40_tcn35_tree_g3_vestas_pseudo2022` |
+| Submission file | `results/submission_pinnfloor350_pinn25_tree20_tcn55_weightedl1_finalfloor10_v1.csv` |
+| Public submit id | `1484025` |
+| Submitted at | `2026-07-11 01:21:21` |
+| Public score | `0.6386205415` |
+| Public 1-nMAE | `0.8682636645` |
+| Public FiCR | `0.4089774184` |
+| Rows | `8760` |
 
-주의:
+Important:
 
-- `results/submission.csv`는 작업 중 계속 덮어쓰는 임시 제출 파일이다.
-- 현재 최고 모델을 가리킬 때는 반드시 위의 고유 파일명을 기준으로 본다.
-- 과거 문서의 `PINN50 + TREE50` 구조는 구버전이다. 현재 최고는 `PINN25 + TREE40 + TCN35`다.
+- `results/submission.csv` is a working scratch file. Do not treat it as the best model.
+- The current public best is not the older `PINN25 + TREE40 + TCN35 + group3 pseudo2022` submission.
+- The current public best uses the plain TREE branch `results/submission_tree_lgbm_best_v2_l1.csv`, not the group3 pseudo2022 TREE branch.
+- The file name says `weightedl1` because the TCN family is the weighted-L1 TCN family.
 
-## 2. 한 줄 파이프라인
+## Formula
 
-```text
-final = 0.25 * PINN + 0.40 * TREE + 0.35 * TCN_family
-
-TCN_family = 0.30 * TCN_W24 + 0.40 * TCN_W72 + 0.30 * TCN_W168
-```
-
-현재 최고 public에서는 `soft_metric TCN`이 아니라 **기존 weighted L1 TCN family**를 사용한다.
-
-## 3. 전체 데이터 흐름
-
-```mermaid
-flowchart TD
-    A["LDAPS/GFS weather"] --> B["feature builders"]
-    C["SCADA train data"] --> D["teacher / power curve / group3 transfer"]
-    E["train_labels"] --> F["year OOF logic"]
-
-    B --> P["PINN branch"]
-    D --> P
-
-    B --> T["TREE branch"]
-    D --> T
-
-    B --> S["TCN W24/W72/W168 branch"]
-
-    P --> PB["PINN prediction"]
-    T --> TB["TREE prediction"]
-    S --> SB["TCN family prediction"]
-
-    PB --> M["0.25 / 0.40 / 0.35 blend"]
-    TB --> M
-    SB --> M
-    M --> O["final submission csv"]
-```
-
-## 4. Branch 역할
-
-| Branch | Weight | 역할 | 현재 기준 파일 |
-|---|---:|---|---|
-| PINN | `0.25` | SCADA teacher/effective wind 기반 물리 모델. peak/FICR 보조 역할 | `results/submission_pinn_lgbm_teacher_year_bagging_stage2_es.csv` |
-| TREE | `0.40` | tuned LGBM tabular model. nMAE와 안정성 주력 | `results/submission_tree_lgbm_best_v2_l1_aggressive_minimal_rolling_v1_g3_vestas_pseudo2022_w010.csv` |
-| TCN W24 | TCN 내부 `0.30` | 짧은 시계열 window | `results/submission_seqnn_short_tcn_w24_v1.csv` |
-| TCN W72 | TCN 내부 `0.40` | 중간 시계열 window. TCN family 중심 | `results/submission_seqnn_mid_tcn_w72_v1.csv` |
-| TCN W168 | TCN 내부 `0.30` | 긴 시계열 window | `results/submission_seqnn_long_tcn_w168_v1.csv` |
-
-TREE branch의 group3는 별도 보정이 들어간다.
+The final prediction is:
 
 ```text
-base TREE all groups
--> group3만 VESTAS teacher + pseudo2022 방식으로 다시 예측
--> group1/group2는 base TREE 유지, group3만 교체
+TCN_family =
+    0.30 * TCN_W24
+  + 0.40 * TCN_W72
+  + 0.30 * TCN_W168
+
+PINN_floor =
+  clip(PINN, 0.35 * capacity, capacity)
+
+blend =
+    0.25 * PINN_floor
+  + 0.20 * TREE
+  + 0.55 * TCN_family
+
+final =
+  clip(blend, 0.10 * capacity, capacity)
 ```
 
-이 방식이 public에서 가장 안전했다. TCN group3 pseudo2022까지 적용한 후보는 public이 낮아져 보류했다.
+Group capacities:
 
-## 5. 빠른 재현: 이미 생성된 branch 파일을 블렌드
+| Group | Capacity |
+|---|---:|
+| `kpx_group_1` | `21600` |
+| `kpx_group_2` | `21600` |
+| `kpx_group_3` | `21000` |
 
-branch 파일들이 이미 `results/`에 있으면 아래 명령만으로 현재 최고 구조를 다시 만들 수 있다.
+## Branch Files
+
+The current best is exactly reproduced from these branch files:
+
+| Branch | File | Role |
+|---|---|---|
+| PINN | `results/submission_pinn_lgbm_teacher_year_bagging.csv` | Physics/effective-wind PINN branch. Legacy filename; keep the file name as-is for exact reproduction. |
+| TREE | `results/submission_tree_lgbm_best_v2_l1.csv` | Tuned group-wise LightGBM TREE branch. |
+| TCN W24 | `results/submission_seqnn_short_tcn_w24_v1.csv` | Short-window TCN. |
+| TCN W72 | `results/submission_seqnn_mid_tcn_w72_v1.csv` | Mid-window TCN. |
+| TCN W168 | `results/submission_seqnn_long_tcn_w168_v1.csv` | Long-window TCN. |
+
+Verification note:
+
+The above branch combination was checked against `results/submission_pinnfloor350_pinn25_tree20_tcn55_weightedl1_finalfloor10_v1.csv`; maximum absolute difference was `3.64e-12`, so the reconstruction is numerically identical.
+
+## Fast Rebuild From Existing Branch Files
+
+Use the normal project environment:
+
+```powershell
+conda run -n WindForecast python --version
+```
+
+Step 1: floor only the PINN branch at 35% capacity.
+
+```powershell
+conda run -n WindForecast python experiments\apply_metric_floor_submission.py `
+  results\submission_pinn_lgbm_teacher_year_bagging.csv `
+  --floor-ratio 0.35 `
+  --output results\submission_pinn_lgbm_teacher_year_bagging_pinnfloor35.csv `
+  --diagnostics-output results\submission_pinn_lgbm_teacher_year_bagging_pinnfloor35_diagnostics.csv
+```
+
+Step 2: blend the floored PINN, TREE, and weighted-L1 TCN family.
 
 ```powershell
 conda run -n WindForecast python experiments\blend_three_branch_submission.py `
-  --pinn results\submission_pinn_lgbm_teacher_year_bagging_stage2_es.csv `
-  --tree results\submission_tree_lgbm_best_v2_l1_aggressive_minimal_rolling_v1_g3_vestas_pseudo2022_w010.csv `
+  --pinn results\submission_pinn_lgbm_teacher_year_bagging_pinnfloor35.csv `
+  --tree results\submission_tree_lgbm_best_v2_l1.csv `
   --tcn24 results\submission_seqnn_short_tcn_w24_v1.csv `
   --tcn72 results\submission_seqnn_mid_tcn_w72_v1.csv `
   --tcn168 results\submission_seqnn_long_tcn_w168_v1.csv `
   --pinn-weight 0.25 `
-  --tree-weight 0.40 `
-  --tcn-family-weight 0.35 `
+  --tree-weight 0.20 `
+  --tcn-family-weight 0.55 `
   --tcn24-weight 0.30 `
   --tcn72-weight 0.40 `
   --tcn168-weight 0.30 `
-  --output results\submission_pinn25_tree40_tcn35_tree_g3_vestas_pseudo2022_w010_rebuild.csv
+  --output results\submission_pinnfloor350_pinn25_tree20_tcn55_weightedl1_prefinalfloor_v1.csv
 ```
 
-제출용 `results/submission.csv`까지 같이 갱신하려면 마지막에 아래 옵션을 추가한다.
+Step 3: apply the final 10% floor.
 
 ```powershell
---also-update-submission-csv
+conda run -n WindForecast python experiments\apply_metric_floor_submission.py `
+  results\submission_pinnfloor350_pinn25_tree20_tcn55_weightedl1_prefinalfloor_v1.csv `
+  --floor-ratio 0.10 `
+  --output results\submission_pinnfloor350_pinn25_tree20_tcn55_weightedl1_finalfloor10_v1.csv `
+  --diagnostics-output results\submission_pinnfloor350_pinn25_tree20_tcn55_weightedl1_finalfloor10_v1_diagnostics.csv
 ```
 
-단, 제출권이 제한되어 있으므로 `submission.csv` 갱신과 실제 제출은 사용자가 명시했을 때만 한다.
+Do not add `--also-update-submission-csv` unless the user explicitly asks to overwrite `results/submission.csv`.
 
-## 6. 전체 재생성 순서
+## Current Best Diagnostics
 
-아래는 branch 파일이 없거나 코드 변경 후 처음부터 다시 만들 때의 순서다.
+Diagnostics file:
 
-### 6.1 PINN branch
+```text
+results/submission_pinnfloor350_pinn25_tree20_tcn55_weightedl1_finalfloor10_v1_diagnostics.csv
+```
+
+Current values:
+
+| Group | PINN floor ratio | PINN floor value | PINN rows raised | Final floor value | Final rows raised after blend | Final mean |
+|---|---:|---:|---:|---:|---:|---:|
+| `kpx_group_1` | `0.35` | `7560` | `4620` | `2160` | `0` | `8822.7941` |
+| `kpx_group_2` | `0.35` | `7560` | `3858` | `2160` | `0` | `9671.8902` |
+| `kpx_group_3` | `0.35` | `7350` | `4672` | `2100` | `0` | `7954.2285` |
+
+The final 10% floor did not raise any row after the blend in this specific submission. It is still part of the official reconstruction recipe.
+
+## From-Scratch Branch Regeneration
+
+Use this section only when the branch files are missing or stale. These commands retrain/regenerate branch files and can take a long time.
+
+### 1. PINN Branch
+
+Command:
 
 ```powershell
 conda run -n WindForecast python predict_pinn_effective_grid_g1_year_bagging.py `
-  --teacher-backend lgbm_time_oof `
-  --output results\submission_pinn_lgbm_teacher_year_bagging_stage2_es.csv `
-  --fold-stats-output results\pinn_lgbm_teacher_year_bagging_stage2_es_fold_stats.csv
+  --output results\submission_pinn_lgbm_teacher_year_bagging.csv `
+  --fold-stats-output results\pinn_lgbm_teacher_year_bagging_fold_stats.csv
 ```
 
-핵심:
+Current code notes:
 
-- year-bagging 구조다.
-- 각 fold는 `2022,2023 -> 2024`, `2022,2024 -> 2023`, `2023,2024 -> 2022` 형태다.
-- test는 세 fold 모델의 예측 평균이다.
-- SCADA raw 값을 test처럼 직접 넣지 않고, weather 기반 teacher 예측값을 사용한다.
-- early stopping은 기본 활성화다.
+- `TEACHER_BACKEND = rf_oob` in `utils/pinn_effective_pipeline.py`.
+- The output file name is legacy and contains `lgbm_teacher`, but new regeneration uses RF-OOB teacher cache logic.
+- `utils/pinn_scada_teacher_config.py` applies the tuned PINN hyperparameters:
 
-### 6.2 TREE base branch
+```text
+LAMBDA:
+  betz = 0.29310056
+  bc = 0.00035899
+  flat = 0.06738267
+  smooth = 0.00323965
+  hod = 0.00004575
+  moy = 0.001
+  hour = 0.01
+  hour_l1 = 0.0
+  hour_prox_start_epoch = 0
+  year = 0.01
+GAMMA = 0.00682273
+BIAS_LR = 0.00201426
+LR = 0.00119518
+```
+
+PINN training structure:
+
+| Item | Value |
+|---|---|
+| Year bagging | train `2022,2023`, `2022,2024`, `2023,2024`; average test predictions |
+| Group1 teacher mode | `cubic` effective grid |
+| Group2 teacher mode | `p90` canonical |
+| Group3 teacher mode | Unison canonical + Vestas canonical mix, Vestas weight `0.30` |
+| Data loss default | `metric_soft` |
+| Stage1 epochs | inherited from `train_pinn.py`, default `500` unless overridden |
+| Stage2 epochs | inherited from `train_pinn.py`, default `2000` unless overridden |
+| Early stopping | enabled by default in the current script |
+
+### 2. TREE Branch
+
+Command:
 
 ```powershell
 conda run -n WindForecast python predict_power_lgbm_best.py `
   --best-csv results\power_lgbm_hyperparams_v2_l1_20_best.csv `
-  --feature-profile aggressive_minimal_rolling_v1 `
-  --output results\submission_tree_lgbm_best_v2_l1_aggressive_minimal_rolling_v1.csv
+  --feature-profile full_v2 `
+  --output results\submission_tree_lgbm_best_v2_l1.csv
 ```
 
-핵심:
+The current public best uses `full_v2` through the script default. Do not substitute `group_family_quota65_v1` if the goal is to reproduce the current public best.
 
-- group별 tuned LGBM을 사용한다.
-- 하이퍼파라미터는 `results/power_lgbm_hyperparams_v2_l1_20_best.csv` 기준이다.
-- feature profile은 현재 최고 기준 `aggressive_minimal_rolling_v1`이다.
-- low-output cutoff와 sample weighting이 들어간다.
+TREE hyperparameters are loaded from:
 
-### 6.3 TREE group3 VESTAS pseudo2022 보정
-
-```powershell
-conda run -n WindForecast python experiments\predict_tree_group3_pseudo2022_submission.py `
-  --base-tree-submission results\submission_tree_lgbm_best_v2_l1_aggressive_minimal_rolling_v1.csv `
-  --best-csv results\power_lgbm_hyperparams_v2_l1_20_best.csv `
-  --feature-profile aggressive_minimal_rolling_v1 `
-  --pseudo-weight 0.10 `
-  --output results\submission_tree_lgbm_best_v2_l1_aggressive_minimal_rolling_v1_g3_vestas_pseudo2022_w010.csv
+```text
+results/power_lgbm_hyperparams_v2_l1_20_best.csv
 ```
 
-핵심:
+Best rows:
 
-- group3는 2022 target이 없어서 데이터 부족 문제가 크다.
-- VESTAS 쪽 2022-2024 학습 정보를 활용해 group3의 2022 pseudo target을 만든다.
-- pseudo row 가중치는 `0.10`이다.
-- 이 보정은 TREE branch에만 적용한 버전이 현재 public 최고다.
+| Group | objective | n_estimators | lr | leaves | depth | min_child | subsample | colsample | alpha | lambda | min_split | min_output_ratio | weight |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `kpx_group_1` | `regression_l1` | `1646` | `0.0203991594` | `128` | `6` | `80` | `0.8184083164` | `0.7571670024` | `0.0081840132` | `1.8139900710` | `0.0265533784` | `0.10` | `actual_sqrt` |
+| `kpx_group_2` | `regression_l1` | `1147` | `0.0144991591` | `48` | `6` | `160` | `0.9438219366` | `0.7670068382` | `0.0333872971` | `3.1545764871` | `0.0527314458` | `0.10` | `actual_sqrt` |
+| `kpx_group_3` | `regression_l1` | `1309` | `0.0259778246` | `64` | `4` | `80` | `0.7483047258` | `0.6741920876` | `0.0011754614` | `2.8931055157` | `0.0406495774` | `0.10` | `actual_sqrt` |
 
-### 6.4 TCN W24
+TREE OOF reference for this branch:
+
+| Metric | Value |
+|---|---:|
+| OOF score | `0.6236110317` |
+| OOF nMAE | `0.1285047060` |
+| OOF FiCR | `0.3757267694` |
+| Worst fold | `0.6066260194` |
+
+### 3. TCN Branches
+
+Weighted-L1 TCN family commands:
 
 ```powershell
 conda run -n WindForecast python experiments\predict_seqnn_submission.py `
   --model tcn `
   --window 24 `
   --stem submission_seqnn_short_tcn_w24_v1
-```
 
-### 6.5 TCN W72
-
-```powershell
 conda run -n WindForecast python experiments\predict_seqnn_submission.py `
   --model tcn `
   --window 72 `
   --stem submission_seqnn_mid_tcn_w72_v1
-```
 
-### 6.6 TCN W168
-
-```powershell
 conda run -n WindForecast python experiments\predict_seqnn_submission.py `
   --model tcn `
   --window 168 `
   --stem submission_seqnn_long_tcn_w168_v1
 ```
 
-TCN 기본 설정:
+Default TCN training settings:
 
 | Setting | Value |
 |---|---:|
-| model | `tcn` |
-| loss | `weighted_l1` |
-| weight policy | `actual_sqrt` |
-| epochs | `120` |
-| patience | `18` |
-| hidden size | `64` |
-| layers | `1` |
-| kernel size | `3` |
-| dropout | `0.10` |
-| lr | `1e-3` |
-| weight decay | `1e-4` |
+| Loss | `weighted_l1` |
+| Weight policy | `actual_sqrt` |
+| Epochs | `120` |
+| Patience | `18` |
+| Batch size | `512` |
+| Eval batch size | `4096` |
+| Hidden size | `64` |
+| Num layers | `1` |
+| Kernel size | `3` |
+| Dropout | `0.10` |
+| LR | `1e-3` |
+| Weight decay | `1e-4` |
+| Gradient clip | `1.0` |
+| Seed | `42` |
 
-soft metric loss TCN은 OOF에서는 좋아 보였지만 public 최고를 넘지 못했으므로 현재 최고 재현에는 쓰지 않는다.
+Do not use the FiCR-only TCN family to reproduce the current best. FiCR-only raised public FiCR but hurt total score.
 
-### 6.7 Final blend
+## Public Best Timeline
 
-```powershell
-conda run -n WindForecast python experiments\blend_three_branch_submission.py `
-  --pinn results\submission_pinn_lgbm_teacher_year_bagging_stage2_es.csv `
-  --tree results\submission_tree_lgbm_best_v2_l1_aggressive_minimal_rolling_v1_g3_vestas_pseudo2022_w010.csv `
-  --tcn24 results\submission_seqnn_short_tcn_w24_v1.csv `
-  --tcn72 results\submission_seqnn_mid_tcn_w72_v1.csv `
-  --tcn168 results\submission_seqnn_long_tcn_w168_v1.csv `
-  --pinn-weight 0.25 `
-  --tree-weight 0.40 `
-  --tcn-family-weight 0.35 `
-  --tcn24-weight 0.30 `
-  --tcn72-weight 0.40 `
-  --tcn168-weight 0.30 `
-  --output results\submission_pinn25_tree40_tcn35_tree_g3_vestas_pseudo2022_w010.csv
-```
+This table tracks public submissions seen in the scoreboard screenshots. `Best-so-far` tells which model was strongest after that timestamp.
 
-## 7. 검증 철학
+| Time KST | Submit id | File / memo | Public score | 1-nMAE | FiCR | Best-so-far after this |
+|---|---:|---|---:|---:|---:|---|
+| `2026-07-09 16:50:38` | `1480546` | `submission.csv`, memo `pinn25_tree40_tcn35_tree_g3_vestas_pseudo2022` | `0.6370788926` | `0.8701764551` | `0.4039813302` | This model |
+| `2026-07-09 17:11:18` | `1480587` | `submission.csv` | `0.6362267968` | `0.8699141079` | `0.4025394858` | `1480546` |
+| `2026-07-09 18:57:39` | `1480736` | `submission.csv` | `0.6357518532` | `0.8692285391` | `0.4022751673` | `1480546` |
+| `2026-07-10 21:28:01` | `1483296` | `submission_pinn45_tcn55_g13_delta0375.csv` | `0.6275136665` | `0.8582049759` | `0.3968223571` | `1480546` |
+| `2026-07-10 21:39:57` | `1483310` | `submission_pinn45_tcn55_tree_stack_g13_clip025.csv` | `0.6335692297` | `0.8667639269` | `0.4003745325` | `1480546` |
+| `2026-07-10 23:12:44` | `1483459` | `submission_pinn10_tree15_tcn75_tcn_ficr_only_family_v1.csv` | `0.6361412210` | `0.8615048788` | `0.4107775632` | `1480546` |
+| `2026-07-10 23:22:07` | `1483482` | `submission_pinn25_tree40pseudo_tcn35_ficr_only_family_v1.csv` | `0.6339040222` | `0.8669600505` | `0.4008479938` | `1480546` |
+| `2026-07-11 00:06:52` | `1483681` | `submission_current_best_floor10.csv` | `0.6364805561` | `0.8702088685` | `0.4027522436` | `1480546` |
+| `2026-07-11 00:13:35` | `1483725` | `submission_pinn25_tree40_tcn35_tree_g3_vestas_pseudo2022_w010_rebuilt_floor10.csv` | `0.6354556595` | `0.8696982200` | `0.4012130991` | `1480546` |
+| `2026-07-11 01:21:21` | `1484025` | `submission_pinnfloor350_pinn25_tree20_tcn55_weightedl1_finalfloor10_v1.csv` | `0.6386205415` | `0.8682636645` | `0.4089774184` | This model |
 
-기본 검증은 leave-one-year-out OOF다.
+Notes:
 
-| Fold | Train years | Predict year |
-|---|---|---|
-| 1 | `2022, 2023` | `2024` |
-| 2 | `2022, 2024` | `2023` |
-| 3 | `2023, 2024` | `2022` |
+- The FiCR-only TCN submission at `2026-07-10 23:12:44` had the highest public FiCR in this list (`0.4107775632`) but lower total score.
+- The `2026-07-11 01:21:21` model won by raising FiCR while keeping nMAE damage manageable.
 
-중요 원칙:
+## OOF Context For The Current Best
 
-- 검증 연도 raw SCADA를 teacher 입력으로 직접 쓰지 않는다.
-- teacher feature는 train row도 OOF/crossfit 예측값으로 만든다.
-- test는 각 leave-one-year model의 예측을 평균한다.
-- 최종 예측은 group capacity 범위로 clamp한다.
-- OOF 상승이 public 상승으로 항상 이어지지 않았으므로, 작은 OOF 개선만으로 제출 파일을 만들지 않는다.
-
-## 8. 새 세션에게 반드시 알려줄 행동 규칙
-
-새 세션은 아래 규칙을 먼저 읽고 지켜야 한다.
-
-1. 실험 전에 목적, 파이프라인, 기대 효과를 사용자에게 먼저 설명한다.
-2. 사용자가 명시하지 않으면 최종 weight를 임의로 바꾸지 않는다. 현재 기준은 `PINN 0.25 / TREE 0.40 / TCN 0.35`다.
-3. 큰 OOF 개선 또는 사용자 명시 요청 없이 test submission을 새로 만들지 않는다.
-4. `results/submission.csv`는 임시 파일이다. 성능을 말할 때는 고유 파일명을 기준으로 한다.
-5. 외부 데이터는 `docs/rules.md` 기준을 따른다. 예측시점 이후 관측값 또는 same-time AWS는 final/test 입력으로 쓰면 안 된다.
-6. exp log는 짧고 직관적으로 남긴다. 길고 복잡한 구조 설명은 별도 docs로 분리한다.
-7. 기존 코드를 크게 바꾸기 전에 현재 파이프라인에서 어느 branch를 건드리는지 명확히 말한다.
-
-## 9. 새 세션 시작용 요약문
-
-새 세션을 팔 때 아래 내용을 그대로 넘기면 된다.
+The OOF grid that motivated the current best is:
 
 ```text
-현재 WindForecast 최고 public은
-results/submission_pinn25_tree40_tcn35_tree_g3_vestas_pseudo2022_w010.csv 이다.
-
-구조는 PINN 25% + TREE 40% + TCN family 35%이고,
-TCN family는 W24 30% + W72 40% + W168 30%이다.
-
-TREE branch는 aggressive_minimal_rolling_v1 tuned LGBM 기반이며,
-group3만 VESTAS transfer + pseudo2022 weight 0.10으로 교체한 파일을 쓴다.
-
-TCN은 soft_metric 버전이 아니라 weighted_l1 기본 TCN W24/W72/W168을 쓴다.
-results/submission.csv는 임시 파일이므로 최고 파일로 간주하지 않는다.
-
-작업 전에 docs/rules.md와 docs/best_model_usage.md를 먼저 읽고,
-실험을 시작하기 전 목적/파이프라인/기대효과를 사용자에게 설명해야 한다.
-작은 OOF 개선만으로 test submission을 만들지 말고, weight도 임의로 바꾸지 않는다.
+results/pinn_floor_three_branch_grid_v1_summary.csv
 ```
 
-## 10. 관련 문서
+Top OOF row:
 
-| Document | Purpose |
-|---|---|
-| `docs/current_best_structure_for_review.md` | 다른 관점 리뷰용 현재 구조 요약 |
-| `docs/rules.md` | 대회 규칙, leakage, 외부 데이터 사용 기준 |
-| `docs/exp_logs.md` | 짧은 실험 로그 |
-| `docs/외부데이터.md` | 외부 AWS 데이터 검토 기록 |
+| PINN floor | PINN weight | TREE weight | TCN weight | OOF score | nMAE | FiCR | Worst fold |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| `0.35` | `0.25` | `0.20` | `0.55` | `0.6336379975` | `0.1283582410` | `0.3956342361` | `0.6224051731` |
 
+Generated submission candidates:
+
+```text
+results/submission_pinn_floor_three_branch_candidates_v1_summary.csv
+```
+
+## Operational Rules
+
+- Before running a new experiment, explain the goal, changed files, validation plan, expected runtime, and result file names to the user.
+- Do not create a submission unless the user explicitly asks.
+- Do not change the current-best weights without user approval.
+- Do not use LGBM teacher training for teacher-style features unless the user explicitly re-approves it.
+- For current-best reproduction, use the branch files and formula in this document.

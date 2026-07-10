@@ -1,5 +1,7 @@
 # Pipeline Contract
 
+> Current-best note: this older contract contains historical references. For the current public-best model, formula, files, and reproduction commands, use `docs/best_model_usage.md`.
+
 작성일: 2026-07-09 KST
 버전: v1
 
@@ -7,7 +9,7 @@
 
 ## 0. 원칙
 
-1. 현재 최고 기준은 `PINN 50 : TREE 50`이다.
+1. 현재 최고 기준은 `docs/best_model_usage.md`의 current public best이다.
 2. validation은 leave-one-year-out OOF를 기본으로 한다.
 3. test submission은 큰 OOF 개선 또는 사용자 명시 요청이 있을 때만 만든다.
 4. train row도 test 상황과 맞게 OOF/crossfit teacher feature를 사용한다.
@@ -161,16 +163,14 @@ Current PINN teacher targets:
 
 Current stable backend:
 
-- `lgbm_time_oof`
+- `rf_oob`
 
 Allowed backend candidates:
 
-- `lgbm_time_oof`
 - `rf_oob`
 - `extra_trees_oof`
-- `multioutput_lgbm`
 
-Any backend change is a separate experiment.
+SCADA LGBM teacher backend is removed. Any backend change is a separate experiment and must not silently retrain a teacher inside another run.
 
 ## 5. Power-Curve Feature Contract
 
@@ -324,7 +324,7 @@ final = 0.5 * pinn_effective + 0.5 * tree_lgbm_best
 
 Rules:
 
-- Default `PINN 50 : TREE 50` must not be changed without user approval.
+- Default blend/floor settings are the current public best settings in `docs/best_model_usage.md` and must not be changed without user approval.
 - Weight search is validation-only unless user asks for test submission.
 - Blend output must be capacity-clipped.
 - Blend metadata must record all input files and weights.

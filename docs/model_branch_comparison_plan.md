@@ -45,7 +45,7 @@
 | TREE full control | `full_v2` | score `0.62361` |
 | TREE minimal rolling | `aggressive_minimal_rolling_v1` | score `0.62396` |
 | PINN current | `pinn_effective`, LGBM teacher | score about `0.61259` |
-| Stable blend | PINN 50 : TREE 50 | 사용자가 바꾸기 전까지 기본 |
+| Stable blend | See `docs/best_model_usage.md` | current public best 기준을 따름 |
 
 현재 TREE feature 기준은 `aggressive_minimal_rolling_v1`로 둔다. `aggressive_minimal_context_v1`은 NMAE는 개선했지만 FICR을 깎았으므로 branch comparison 기준으로 쓰지 않는다.
 
