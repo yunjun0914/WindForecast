@@ -4,6 +4,12 @@ Updated: 2026-07-11 KST
 
 This document is the source of truth for the current public-best submission, how to rebuild it from existing branch files, and how to regenerate the branch files from scratch.
 
+For the full branch-by-branch structure, data usage, losses, floor logic, and known OOF provenance gap, see:
+
+```text
+docs/current_best_detailed_structure.md
+```
+
 ## Current Public Best
 
 | Item | Value |
