@@ -106,3 +106,43 @@ class TCNPowerRegressor(nn.Module):
         out = self.network(x)
         last = out[:, :, -1]
         return self.head(last).squeeze(-1)
+
+
+class TCNRegimeClassifier(nn.Module):
+    def __init__(
+        self,
+        input_size,
+        n_classes=4,
+        hidden_size=64,
+        num_layers=1,
+        kernel_size=3,
+        dropout=0.10,
+    ):
+        super().__init__()
+        layers = []
+        in_channels = input_size
+        for layer_idx in range(num_layers):
+            dilation = 2**layer_idx
+            layers.append(
+                TemporalBlock(
+                    in_channels,
+                    hidden_size,
+                    kernel_size,
+                    dilation,
+                    dropout,
+                )
+            )
+            in_channels = hidden_size
+        self.network = nn.Sequential(*layers)
+        self.head = nn.Sequential(
+            nn.LayerNorm(hidden_size),
+            nn.Linear(hidden_size, max(16, hidden_size // 2)),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(max(16, hidden_size // 2), n_classes),
+        )
+
+    def forward(self, x):
+        x = x.transpose(1, 2)
+        out = self.network(x)
+        return self.head(out[:, :, -1])
