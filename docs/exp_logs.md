@@ -2744,3 +2744,10 @@ nonzero differences > 1e-9 = 0
 - 중출력 구간 `power_ratio^(1/3)`과 SCADA cubic-mean wind 관계는 mean correlation `0.80~0.91`, 터빈별 연도 coefficient CV 평균 `0.47~0.70%`로 매우 안정적.
 - 최신 issue24 OOF의 2023~2024 공통행 base `0.638510`; 실제 total+예측 share oracle `0.791575`, 예측 total+실제 share oracle `0.664789`. 모든 그룹에서 total 교체 상한이 크게 상승해 전체 발전량 오차가 주 병목으로 판정.
 - group3 UNISON SCADA도 2023년부터 시작해 2022 label 복원은 불가. 다음 우선순위는 direct whole-farm total 모델 후 기존/단순 share로 분배, 그다음 power-equivalent wind target.
+
+### 2026-07-14 - Direct total target decomposition OOF
+
+- duck GPU, common weather 34개로 issue24 h128-L3 TCN과 fixed L1 TREE가 `S12=g1+g2`, `S123=g1+g2+g3`를 직접 학습. 기존 per-turbine issue24 group share로 재분배; submission 없음.
+- 현재 group 예측 합산 total이 S12 `0.674790`, S123 `0.669677`; direct TCN은 `0.653520/0.642125`, TREE는 `0.641901/0.622081`. 직접 total 단독은 local/turbine 정보를 잃어 명확히 약함.
+- coarse grid 최고 25%는 거의 무효였으나 fine grid에서 TCN total 5%가 유효: S123 공통 2023~2024 `0.638510→0.639118` (`+0.000608`). 2022 S12 5%와 결합한 full hierarchy `0.635935→0.636402` (`+0.000467`).
+- group-year 8개 중 6개 개선; g1 2022 `-0.000031`, g3 2024 `-0.000807`. direct-total은 본체가 아니라 약한 독립 보조 신호로만 유지하며 submission 후보로 승격하지 않음.
