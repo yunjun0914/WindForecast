@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from sklearn.metrics import make_scorer
 
 TARGET_COLS = ["kpx_group_1", "kpx_group_2", "kpx_group_3"]
@@ -61,3 +62,60 @@ def metric(answer_df, pred_df):
         group_nmaes.append(nmae)
         group_ficrs.append(ficr)
     return total_score(group_nmaes, group_ficrs)
+
+
+def pooled_oof_summary(
+    predictions,
+    variant_col="variant",
+    group_col="group",
+    actual_col="official_target",
+    forecast_col="pred",
+):
+    """Score concatenated outer-fold predictions with the official group weighting."""
+    required = [variant_col, group_col, actual_col, forecast_col]
+    missing = [col for col in required if col not in predictions.columns]
+    if missing:
+        raise ValueError(f"OOF predictions missing columns: {missing}")
+
+    group_rows = []
+    for variant, variant_predictions in predictions.groupby(variant_col, sort=False):
+        present_groups = set(variant_predictions[group_col].unique())
+        missing_groups = [group for group in TARGET_COLS if group not in present_groups]
+        if missing_groups:
+            raise ValueError(f"OOF variant {variant} missing groups: {missing_groups}")
+
+        for group in TARGET_COLS:
+            group_predictions = variant_predictions.loc[
+                variant_predictions[group_col].eq(group)
+            ]
+            nmae, ficr = group_nmae_ficr(
+                group_predictions[actual_col],
+                group_predictions[forecast_col],
+                GROUP_CAPACITY_KWH[group],
+            )
+            group_rows.append(
+                {
+                    "variant": variant,
+                    "group": group,
+                    "score": 0.5 * (1.0 - nmae) + 0.5 * ficr,
+                    "nmae": nmae,
+                    "ficr": ficr,
+                    "n_rows": len(group_predictions),
+                }
+            )
+
+    group_scores = pd.DataFrame(group_rows)
+    summary = (
+        group_scores.groupby("variant", as_index=False)
+        .agg(
+            mean_nmae=("nmae", "mean"),
+            mean_ficr=("ficr", "mean"),
+            worst_group_score=("score", "min"),
+            std_group_score=("score", lambda values: values.std(ddof=0)),
+            n_groups=("group", "nunique"),
+        )
+    )
+    summary["mean_score"] = (
+        0.5 * (1.0 - summary["mean_nmae"]) + 0.5 * summary["mean_ficr"]
+    )
+    return summary, group_scores

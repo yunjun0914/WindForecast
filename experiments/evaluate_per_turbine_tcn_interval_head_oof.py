@@ -12,7 +12,12 @@ from torch.utils.data import DataLoader, TensorDataset
 
 import _bootstrap  # noqa: F401
 from models.seqnn import TCNPowerRegressor
-from utils.metrics import GROUP_CAPACITY_KWH, TARGET_COLS, group_nmae_ficr
+from utils.metrics import (
+    GROUP_CAPACITY_KWH,
+    TARGET_COLS,
+    group_nmae_ficr,
+    pooled_oof_summary,
+)
 from utils.per_turbine_features import get_or_build_group_feature_cache, tree_feature_columns
 from utils.per_turbine_optimal_grid import (
     OPTIMAL_GRID_CUBIC_ISSUE_CONTEXT_TAG,
@@ -1065,21 +1070,22 @@ def main() -> None:
                 return
 
     scores = pd.DataFrame(score_rows)
+    group_predictions = pd.concat(group_prediction_parts, ignore_index=True)
+    summary, pooled_group_scores = pooled_oof_summary(group_predictions)
     fold_means = (
         scores.groupby(["variant", "pred_year"], as_index=False)
         .agg(score=("score", "mean"), nmae=("nmae", "mean"), ficr=("ficr", "mean"))
     )
-    summary = (
+    fold_diagnostics = (
         fold_means.groupby("variant", as_index=False)
         .agg(
-            mean_score=("score", "mean"),
-            mean_nmae=("nmae", "mean"),
-            mean_ficr=("ficr", "mean"),
             worst_fold=("score", "min"),
             std_score=("score", lambda values: values.std(ddof=0)),
             n_folds=("score", "count"),
         )
     )
+    summary = summary.merge(fold_diagnostics, on="variant", how="left")
+    summary = summary.sort_values("mean_score", ascending=False).reset_index(drop=True)
     summary["model"] = args.stem
     summary["n_models"] = model_counter
     summary["n_features"] = scores["n_features"].max()
@@ -1098,8 +1104,13 @@ def main() -> None:
         encoding="utf-8-sig",
     )
     scores.to_csv(args.results_dir / f"{args.stem}_scores.csv", index=False, encoding="utf-8-sig")
+    pooled_group_scores.to_csv(
+        args.results_dir / f"{args.stem}_pooled_group_scores.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
     summary.to_csv(args.results_dir / f"{args.stem}_summary.csv", index=False, encoding="utf-8-sig")
-    pd.concat(group_prediction_parts, ignore_index=True).to_csv(
+    group_predictions.to_csv(
         args.results_dir / f"{args.stem}_predictions.csv", index=False, encoding="utf-8-sig"
     )
     pd.concat(turbine_prediction_parts, ignore_index=True).to_csv(

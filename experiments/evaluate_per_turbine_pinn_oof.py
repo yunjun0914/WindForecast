@@ -12,7 +12,12 @@ from torch.utils.data import DataLoader, TensorDataset
 
 import _bootstrap  # noqa: F401
 from models.per_turbine_pinn import PerTurbineResidualPINN, PerTurbineResidualTCNPINN
-from utils.metrics import GROUP_CAPACITY_KWH, TARGET_COLS, group_nmae_ficr
+from utils.metrics import (
+    GROUP_CAPACITY_KWH,
+    TARGET_COLS,
+    group_nmae_ficr,
+    pooled_oof_summary,
+)
 from utils.per_turbine_features import get_or_build_group_feature_cache, tree_feature_columns
 from utils.per_turbine_optimal_grid import (
     OPTIMAL_GRID_REPLACE_TAG,
@@ -898,24 +903,23 @@ def main() -> None:
                 return
 
     scores = pd.DataFrame(score_rows)
-    summary_rows = []
-    for variant, variant_scores in scores.groupby("variant"):
-        fold_means = variant_scores.groupby("pred_year", as_index=False)[
-            ["score", "nmae", "ficr"]
-        ].mean()
-        summary_rows.append(
-            {
-                "variant": variant,
-                "mean_score": fold_means["score"].mean(),
-                "mean_nmae": fold_means["nmae"].mean(),
-                "mean_ficr": fold_means["ficr"].mean(),
-                "worst_fold": fold_means["score"].min(),
-                "std_score": fold_means["score"].std(ddof=0),
-                "n_folds": len(fold_means),
-                "n_models": model_counter,
-            }
+    group_predictions = pd.concat(group_parts, ignore_index=True)
+    summary, pooled_group_scores = pooled_oof_summary(group_predictions)
+    fold_means = (
+        scores.groupby(["variant", "pred_year"], as_index=False)
+        .agg(score=("score", "mean"))
+    )
+    fold_diagnostics = (
+        fold_means.groupby("variant", as_index=False)
+        .agg(
+            worst_fold=("score", "min"),
+            std_score=("score", lambda values: values.std(ddof=0)),
+            n_folds=("score", "count"),
         )
-    summary = pd.DataFrame(summary_rows).sort_values("mean_score", ascending=False)
+    )
+    summary = summary.merge(fold_diagnostics, on="variant", how="left")
+    summary["n_models"] = model_counter
+    summary = summary.sort_values("mean_score", ascending=False).reset_index(drop=True)
     pd.DataFrame(training_rows).to_csv(
         args.results_dir / f"{args.stem}_training.csv", index=False, encoding="utf-8-sig"
     )
@@ -925,8 +929,13 @@ def main() -> None:
         encoding="utf-8-sig",
     )
     scores.to_csv(args.results_dir / f"{args.stem}_scores.csv", index=False, encoding="utf-8-sig")
+    pooled_group_scores.to_csv(
+        args.results_dir / f"{args.stem}_pooled_group_scores.csv",
+        index=False,
+        encoding="utf-8-sig",
+    )
     summary.to_csv(args.results_dir / f"{args.stem}_summary.csv", index=False, encoding="utf-8-sig")
-    pd.concat(group_parts, ignore_index=True).to_csv(
+    group_predictions.to_csv(
         args.results_dir / f"{args.stem}_predictions.csv", index=False, encoding="utf-8-sig"
     )
     pd.concat(turbine_parts, ignore_index=True).to_csv(
