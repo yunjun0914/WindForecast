@@ -5,7 +5,7 @@ import pandas as pd
 import torch
 
 from models.issue_block_tcn import IssueBlockTCN
-from utils.issue_block_dataset import make_issue_blocks
+from utils.issue_block_dataset import make_issue_blocks, make_per_turbine_issue_blocks
 from utils.metrics import TARGET_COLS
 
 
@@ -35,6 +35,28 @@ class IssueBlockDatasetTests(unittest.TestCase):
         self.assertEqual(blocks.targets.shape, (1, 24, 3))
         self.assertEqual(blocks.years.tolist(), [2023])
         self.assertEqual(blocks.features[0, :, 0].tolist(), list(map(float, range(12, 36))))
+
+    def test_per_turbine_blocks_keep_target_and_official_alignment(self):
+        issue_time = pd.Timestamp("2023-05-01 00:00:00")
+        forecast = pd.date_range(
+            issue_time + pd.Timedelta(hours=12), periods=24, freq="h"
+        )
+        table = pd.DataFrame(
+            {
+                "forecast_kst_dtm": forecast,
+                "data_available_kst_dtm": issue_time,
+                "wind": np.arange(24, dtype=float),
+                "turbine_target": np.arange(24, dtype=float) + 100.0,
+                "official_target": np.arange(24, dtype=float) + 1000.0,
+            }
+        )
+
+        blocks = make_per_turbine_issue_blocks(table, ["wind"])
+
+        self.assertEqual(blocks.features.shape, (1, 24, 1))
+        np.testing.assert_allclose(blocks.targets[0], table["turbine_target"])
+        np.testing.assert_allclose(blocks.official_targets[0], table["official_target"])
+        np.testing.assert_array_equal(blocks.forecast_times[0], forecast.to_numpy())
 
 
 class IssueBlockTcnTests(unittest.TestCase):
