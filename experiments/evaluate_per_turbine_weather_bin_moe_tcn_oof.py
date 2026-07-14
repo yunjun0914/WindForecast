@@ -275,18 +275,10 @@ def main() -> None:
                 val_weather = aligned_numeric_column(
                     val_table, pd.DatetimeIndex(val_time)[val_positions], WEATHER_REGIME_COL
                 )
-                weather_reference = train_weather[np.isfinite(train_weather)]
-                boundaries = fit_weather_quantile_boundaries(weather_reference)
                 if np.any(~np.isfinite(val_weather)):
                     raise ValueError(
                         f"Nonfinite weather regime for {group}/{turbine}/{pred_year}"
                     )
-                all_train_bins = weather_quantile_bins(train_weather, boundaries)
-                val_bins = weather_quantile_bins(val_weather, boundaries)
-                val_soft_weights = adjacent_quartile_weights(
-                    empirical_weather_percentiles(val_weather, weather_reference)
-                )
-
                 train_keep = (
                     np.isfinite(y_train)
                     & np.isfinite(official_train)
@@ -301,6 +293,13 @@ def main() -> None:
                         f"Too few global train rows for "
                         f"{group}/{turbine}/{pred_year}"
                     )
+                weather_reference = train_weather[train_keep]
+                boundaries = fit_weather_quantile_boundaries(weather_reference)
+                train_bins = weather_quantile_bins(weather_reference, boundaries)
+                val_bins = weather_quantile_bins(val_weather, boundaries)
+                val_soft_weights = adjacent_quartile_weights(
+                    empirical_weather_percentiles(val_weather, weather_reference)
+                )
                 scaler = SequenceStandardScaler()
                 x_train_scaled = scaler.fit_transform(x_train[train_keep])
                 x_val_scaled = scaler.transform(x_val[val_positions])
@@ -343,8 +342,6 @@ def main() -> None:
                             "train_loss": baseline_losses[epoch],
                         }
                     )
-
-                train_bins = all_train_bins[train_keep]
                 expert_by_epoch = {
                     epoch: np.zeros((len(group_times), N_BINS), dtype=float)
                     for epoch in checkpoints
