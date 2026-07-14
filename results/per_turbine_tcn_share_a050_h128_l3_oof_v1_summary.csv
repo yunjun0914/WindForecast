@@ -1,0 +1,2 @@
+﻿variant,mean_score,mean_nmae,mean_ficr,worst_fold,std_score,n_folds,model,n_models,n_features,window
+baseline_retrained,0.6413816306513085,0.12745381976866446,0.4102170810712815,0.6266886975879983,0.01100481232036701,3,per_turbine_tcn_share_a050_h128_l3_oof_v1,46,75,72

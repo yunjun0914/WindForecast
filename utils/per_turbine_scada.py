@@ -131,6 +131,54 @@ def build_official_aligned_turbine_targets(
     return hourly.sort_values(["forecast_kst_dtm", "turbine_id"]).reset_index(drop=True)
 
 
+def build_static_turbine_share_priors(
+    targets: pd.DataFrame,
+    group: str,
+    train_years: list[int],
+    target_min_output_ratio: float = 0.10,
+) -> pd.Series:
+    required = ["turbine_id", "year", "official_target", "scada_share"]
+    missing = [col for col in required if col not in targets.columns]
+    if missing:
+        raise ValueError(f"Static-share targets missing columns: {missing}")
+
+    capacity = GROUP_CAPACITY_KWH[group]
+    train = targets.loc[
+        targets["year"].isin(train_years)
+        & targets["official_target"].ge(capacity * target_min_output_ratio)
+    ].dropna(subset=["scada_share"])
+    priors = (
+        train.groupby("turbine_id")["scada_share"]
+        .mean()
+        .reindex(GROUP_TURBINE_PREFIXES[group])
+    )
+    if priors.isna().any() or float(priors.sum()) <= 0:
+        raise ValueError(f"Incomplete static turbine shares for {group}: {priors.to_dict()}")
+    return priors / float(priors.sum())
+
+
+def apply_turbine_share_shrinkage(
+    targets: pd.DataFrame,
+    static_shares: pd.Series,
+    dynamic_weight: float,
+) -> pd.DataFrame:
+    if not 0.0 <= dynamic_weight <= 1.0:
+        raise ValueError(f"dynamic_weight must be in [0, 1], got {dynamic_weight}")
+    out = targets.copy()
+    dynamic = pd.to_numeric(out["scada_share"], errors="coerce")
+    static = pd.to_numeric(out["turbine_id"].map(static_shares), errors="coerce")
+    if static.isna().any():
+        missing = sorted(out.loc[static.isna(), "turbine_id"].astype(str).unique())
+        raise ValueError(f"Missing static shares for turbines: {missing}")
+
+    blended = dynamic_weight * dynamic + (1.0 - dynamic_weight) * static
+    out["dynamic_scada_share"] = dynamic
+    out["static_scada_share"] = static
+    out["training_scada_share"] = blended
+    out["turbine_target"] = out["official_target"] * blended
+    return out
+
+
 def target_integrity_summary(targets: pd.DataFrame) -> pd.DataFrame:
     valid = targets.dropna(subset=["turbine_target", "official_target"])
     grouped = (

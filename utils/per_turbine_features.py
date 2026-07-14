@@ -15,7 +15,7 @@ from utils.tree_feature_profiles import (
 )
 
 
-FEATURE_CACHE_VERSION = "per_turbine_features_v1"
+FEATURE_CACHE_VERSION = "per_turbine_features_v2_issue_safe"
 
 LDAPS_LEVELS = {
     "ws10": ("heightAboveGround_10_10u", "heightAboveGround_10_10v"),
