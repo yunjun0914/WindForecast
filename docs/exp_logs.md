@@ -2735,3 +2735,12 @@ nonzero differences > 1e-9 = 0
 - 공식 pooled OOF `0.635941` (nMAE `0.129307`, FiCR `0.401188`); 과거 h128-L3 fold 지표의 group-pooled 복원치 약 `0.635718` 대비 `+0.000223`, 8개 group-year 중 5개 개선.
 - group3 shared-full direct branch를 20% 혼합한 진단 최고 `0.636176`; group3 2023/2024 모두 개선했지만 전체 추가 이득은 `+0.000235`.
 - 같은-issue 미래 NWP 신호는 재확인했으나 최종 체급 상승은 noise 수준. submission 후보로 승격하지 않고 구조 아이디어만 유지.
+
+### 2026-07-14 - First-principles target structure audit
+
+- 원시 train weather/labels/SCADA와 최신 issue24 OOF만 사용한 진단; 학습 및 submission 없음.
+- 같은 issue `t-2~t+2` NWP phase 최적화는 power-equivalent MAE 개선이 최대 약 `0.36%`로 작아 핵심 병목에서 제외.
+- 실제 `g1+g2` total을 준 oracle은 정적 share만으로 2-group score `0.857962`; 풍향 share는 `0.854075`로 불필요. 실제 3-group total에서는 정적 `0.712532`, 풍향 share `0.756132`로 group3 분배에 풍향 신호 확인.
+- 중출력 구간 `power_ratio^(1/3)`과 SCADA cubic-mean wind 관계는 mean correlation `0.80~0.91`, 터빈별 연도 coefficient CV 평균 `0.47~0.70%`로 매우 안정적.
+- 최신 issue24 OOF의 2023~2024 공통행 base `0.638510`; 실제 total+예측 share oracle `0.791575`, 예측 total+실제 share oracle `0.664789`. 모든 그룹에서 total 교체 상한이 크게 상승해 전체 발전량 오차가 주 병목으로 판정.
+- group3 UNISON SCADA도 2023년부터 시작해 2022 label 복원은 불가. 다음 우선순위는 direct whole-farm total 모델 후 기존/단순 share로 분배, 그다음 power-equivalent wind target.
