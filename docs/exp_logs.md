@@ -2727,3 +2727,11 @@ nonzero differences > 1e-9 = 0
 - Same-time SCADA wind oracle `0.838784`로 핵심 병목이 NWP→터빈 실효풍속 복원임을 확인.
 - Spatial/ST heterogeneous GNN은 최고 약 `0.627`, 기존 branch와 residual corr 약 `0.98`; wind-supervised E2E와 learnable wind bias도 승격 실패.
 - 다음 핵심 가설은 measured SCADA wind 대신 실제 발전량을 설명하는 power-equivalent wind teacher이며 아직 미실험.
+
+### 2026-07-14 - Per-turbine 24h issue full-context TCN OOF
+
+- duck GPU, 기존 per-turbine share50 target/터빈 합산/h128-L3를 유지하고 W72 causal 대신 예보 발행 시점에 함께 공개된 24시간 issue 전체를 full-context TCN으로 학습. submission 없음.
+- 삭제됐던 optimal-grid cache 생성 경로를 train-only 118개 LDAPS/GFS grid-level 후보 선택과 affine wind calibration으로 복구; validation 연도는 선택에 미사용.
+- 공식 pooled OOF `0.635941` (nMAE `0.129307`, FiCR `0.401188`); 과거 h128-L3 fold 지표의 group-pooled 복원치 약 `0.635718` 대비 `+0.000223`, 8개 group-year 중 5개 개선.
+- group3 shared-full direct branch를 20% 혼합한 진단 최고 `0.636176`; group3 2023/2024 모두 개선했지만 전체 추가 이득은 `+0.000235`.
+- 같은-issue 미래 NWP 신호는 재확인했으나 최종 체급 상승은 noise 수준. submission 후보로 승격하지 않고 구조 아이디어만 유지.
