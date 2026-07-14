@@ -2758,3 +2758,9 @@ nonzero differences > 1e-9 = 0
 - pooled epoch10: global `0.624476`, soft MoE `0.617789`, global50/MoE50 `0.622842`. epoch20도 `0.619450 -> 0.615546`, epoch40도 `0.615731 -> 0.605485`로 모두 하락.
 - actual-bin oracle은 epoch20 `0.809231`로 expert 분화 상한은 매우 컸다. 하지만 gate exact accuracy는 group-year별 약 `49~59%`, adjacent accuracy는 약 `91~95%`; global 연속 예측을 bin으로 바꿔도 pooled exact `55.47%`로 동일한 병목.
 - 결론: 25% bin 오분류는 FiCR 허용폭 6~8%보다 너무 크며, soft blend는 인접 mode 사이로 평균되어 FiCR을 깨고 hard gate는 오분류를 그대로 반영한다. 현재 broad-bin MoE는 기각하고 결과는 gate/expert 진단 자료로만 유지.
+
+### 2026-07-14 - Weather-quantile TCN mixture-of-experts OOF
+
+- duck GPU. 터빈별 same-issue `t-2~t+2` optimal-grid 풍속 중앙값을 outer-train 평가행의 분위수로 4등분하고, mixed-weather W72 h64-L1 expert를 독립 학습. 관측 가능한 weather router라 gate 모델/누수 없음; submission 없음.
+- pooled epoch10: global `0.624476`, weather-soft `0.623272`, global50/weather50 `0.625522` (`+0.001046`). blend는 nMAE `0.128950→0.128325`, FiCR `0.377902→0.379369`로 둘 다 개선.
+- 결론: weather expert 단독 체급은 global보다 낮지만 오차 다양성은 유효. 작은 보조 branch 후보로 유지하되 현재 최고 pipeline 승격 및 submission은 보류.
