@@ -2764,3 +2764,10 @@ nonzero differences > 1e-9 = 0
 - duck GPU. 터빈별 same-issue `t-2~t+2` optimal-grid 풍속 중앙값을 outer-train 평가행의 분위수로 4등분하고, mixed-weather W72 h64-L1 expert를 독립 학습. 관측 가능한 weather router라 gate 모델/누수 없음; submission 없음.
 - pooled epoch10: global `0.624476`, weather-soft `0.623272`, global50/weather50 `0.625522` (`+0.001046`). blend는 nMAE `0.128950→0.128325`, FiCR `0.377902→0.379369`로 둘 다 개선.
 - 결론: weather expert 단독 체급은 global보다 낮지만 오차 다양성은 유효. 작은 보조 branch 후보로 유지하되 현재 최고 pipeline 승격 및 submission은 보류.
+
+### 2026-07-14 - Direct group local-panel W29 TCN OOF
+
+- duck GPU. 공통 weather 64개와 터빈별 `wake2+optimal-grid5`를 고정 순서 panel로 구성하고, per-turbine power pseudo-target 없이 공식 group 발전량을 W29 h128-L3 TCN이 직접 예측. mean-local matched baseline 포함; group1/2 epoch는 inner-year hard Score 선택, group3는 고정 epoch10. submission 없음.
+- pooled mean panel `0.608959`, full local panel `0.617830` (`+0.008872`). full panel은 nMAE `0.136223→0.134994`, FiCR `0.354140→0.370655`로 모두 개선.
+- group별 mean→full: g1 `0.601696→0.633956`, g2 `0.655685→0.645968`, g3 `0.569495→0.573567`. local 배열은 g1에서 결정적이지만 g2는 터빈 평균화가 더 강함.
+- 결론: local-panel 가설은 확인했으나 단일 flatten TCN standalone은 기존 per-turbine/issue24 TCN 체급 미달. 현재 pipeline 승격 없이 단지별 공간 집계 구조의 근거로 유지.
