@@ -2751,3 +2751,10 @@ nonzero differences > 1e-9 = 0
 - 현재 group 예측 합산 total이 S12 `0.674790`, S123 `0.669677`; direct TCN은 `0.653520/0.642125`, TREE는 `0.641901/0.622081`. 직접 total 단독은 local/turbine 정보를 잃어 명확히 약함.
 - coarse grid 최고 25%는 거의 무효였으나 fine grid에서 TCN total 5%가 유효: S123 공통 2023~2024 `0.638510→0.639118` (`+0.000608`). 2022 S12 5%와 결합한 full hierarchy `0.635935→0.636402` (`+0.000467`).
 - group-year 8개 중 6개 개선; g1 2022 `-0.000031`, g3 2024 `-0.000807`. direct-total은 본체가 아니라 약한 독립 보조 신호로만 유지하며 submission 후보로 승격하지 않음.
+
+### 2026-07-14 - Output-bin weather TCN mixture-of-experts OOF
+
+- duck GPU. mixed-weather per-turbine W72 h64-L1을 고정하고 group capacity ratio `[0,.25)/[.25,.5)/[.5,.75)/[.75,1]`별 독립 expert 4개와 group weather softmax gate를 학습. outer score로 checkpoint를 고르지 않고 epoch `10/20/40`을 사전 고정; submission 없음.
+- pooled epoch10: global `0.624476`, soft MoE `0.617789`, global50/MoE50 `0.622842`. epoch20도 `0.619450 -> 0.615546`, epoch40도 `0.615731 -> 0.605485`로 모두 하락.
+- actual-bin oracle은 epoch20 `0.809231`로 expert 분화 상한은 매우 컸다. 하지만 gate exact accuracy는 group-year별 약 `49~59%`, adjacent accuracy는 약 `91~95%`; global 연속 예측을 bin으로 바꿔도 pooled exact `55.47%`로 동일한 병목.
+- 결론: 25% bin 오분류는 FiCR 허용폭 6~8%보다 너무 크며, soft blend는 인접 mode 사이로 평균되어 FiCR을 깨고 hard gate는 오분류를 그대로 반영한다. 현재 broad-bin MoE는 기각하고 결과는 gate/expert 진단 자료로만 유지.
