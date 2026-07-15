@@ -492,7 +492,7 @@ promoted three-seed confirmation: additional 10-18 hours
 - [x] LDAPS-core 1-seed OOF
 - [x] GFS-core 1-seed OOF
 - [x] GEFS-mean-core 1-seed OOF
-- [ ] core source ensemble
+- [x] core source ensemble
 - [ ] 변수군 ablation 승인
 - [ ] promoted model 3-seed 확인
 - [ ] current-best matched OOF 비교
@@ -550,6 +550,44 @@ Local: results/source_experts_v1_contract/
 ```text
 Duck:  /home/yunjun0914/windforecast_runs/source_experts_v1/
 Local: results/source_experts_v1/
+```
+
+### Phase 3 완료 기록
+
+2026-07-16 leave-one-year-out meta blend, code commit `4a092b7`:
+
+```text
+prediction = w_ldaps * LDAPS + w_gfs * GFS + w_gefs * GEFS
+w >= 0, sum(w) = 1, intercept/floor/group split 없음
+```
+
+각 held-out year를 제외한 두 OOF year에서 pooled hard Score로 공통 source weight를 선택했다. `2.5%` coarse grid 후 각 weight 주변 `0.5%` local refinement만 수행했다.
+
+| Held-out year | LDAPS | GFS | GEFS | Held-out Score | LDAPS delta |
+|---|---:|---:|---:|---:|---:|
+| 2022 | 0.635 | 0.255 | 0.110 | 0.629839 | +0.010274 |
+| 2023 | 0.650 | 0.120 | 0.230 | 0.626001 | +0.008642 |
+| 2024 | 0.560 | 0.255 | 0.185 | 0.646325 | +0.006540 |
+
+Pooled nested 결과:
+
+```text
+Score = 0.630831
+NMAE  = 0.137974
+FiCR  = 0.399637
+LDAPS standalone 대비 +0.008137
+```
+
+- group delta도 g1 `+0.006924`, g2 `+0.009758`, g3 `+0.007730`으로 모두 개선
+- 69,747행, 중복 key 0, non-finite 0
+- test prediction과 submission은 생성하지 않음
+- 이 평가는 held-out year의 label/error를 weight 선택에서 직접 제외하지만, base model까지 meta fold 안에서 재학습한 완전한 2-level nested CV는 아님
+- meta-train OOF를 만든 base fold가 meta held-out year를 학습에 포함할 수 있으므로 `+0.008137`은 강한 source diversity 신호이며 완전히 unbiased한 미래 성능 추정치로 해석하지 않음
+
+산출물:
+
+```text
+Local: results/source_experts_v1/source_expert_convex_nested_*.csv
 ```
 
 ## 13. 계획 변경 규칙

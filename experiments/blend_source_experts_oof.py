@@ -357,7 +357,7 @@ def main() -> None:
     ) as file:
         json.dump(manifest, file, ensure_ascii=False, indent=2)
 
-    print("\n=== Honest nested source blend ===", flush=True)
+    print("\n=== Meta-year held-out source blend ===", flush=True)
     print(comparison.to_string(index=False), flush=True)
 
 

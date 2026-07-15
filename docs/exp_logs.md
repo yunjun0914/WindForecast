@@ -3045,3 +3045,10 @@ nonzero differences > 1e-9 = 0
 - pooled Score/NMAE/FiCR: LDAPS `0.622694/0.145303/0.390690`, GFS `0.610861/0.150873/0.372595`, GEFS mean `0.610921/0.152362/0.374204`.
 - cross-year 3 issues는 fold 전체 제외. GEFS fallback train issues는 fold별 `1/2/3`개 제외하고 validation에는 유지. source별 69,747 OOF행, 중복/non-finite 0.
 - LDAPS가 세 group 모두 1위지만 source residual correlation은 `0.742~0.827`로 독립 오차가 남음. 다음 source blend는 별도 승인 전 실행하지 않음. 결과는 ignored `results/source_experts_v1/`.
+
+### 2026-07-16 - Leave-one-year-out source convex blend
+
+- 기존 세 source OOF만 사용. held-out year를 제외한 두 OOF year에서 공통 nonnegative/sum-to-one weight를 hard Score로 선택하고 held-out에 적용; `2.5%` coarse 후 `0.5%` local refinement. 절편/group/horizon/floor 없음.
+- weight LDAPS/GFS/GEFS: holdout 2022 `63.5/25.5/11.0`, 2023 `65.0/12.0/23.0`, 2024 `56.0/25.5/18.5%`. held-out Score `0.629839/0.626001/0.646325`로 LDAPS 대비 모두 개선.
+- pooled `0.630831` (NMAE `0.137974`, FiCR `0.399637`), LDAPS standalone 대비 `+0.008137`. g1/g2/g3도 각각 `+0.006924/+0.009758/+0.007730`.
+- base model까지 다시 접은 완전한 2-level nested CV는 아니므로 강한 source diversity 신호로 해석하며 unbiased 미래 성능으로 과장하지 않음. test/submission 없음. 결과는 ignored `results/source_experts_v1/source_expert_convex_nested_*`.
