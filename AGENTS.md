@@ -8,6 +8,7 @@
 2. `docs/best_model_usage.md` (과거 모델 기록)
 3. `docs/rules.md`
 4. `docs/exp_logs.md` 최근 항목
+5. `docs/source_expert_pipeline_plan.md` (현재 활성 계획)
 
 ## Current Best Model
 

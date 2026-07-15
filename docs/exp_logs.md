@@ -2771,3 +2771,261 @@ nonzero differences > 1e-9 = 0
 - pooled mean panel `0.608959`, full local panel `0.617830` (`+0.008872`). full panel은 nMAE `0.136223→0.134994`, FiCR `0.354140→0.370655`로 모두 개선.
 - group별 mean→full: g1 `0.601696→0.633956`, g2 `0.655685→0.645968`, g3 `0.569495→0.573567`. local 배열은 g1에서 결정적이지만 g2는 터빈 평균화가 더 강함.
 - 결론: local-panel 가설은 확인했으나 단일 flatten TCN standalone은 기존 per-turbine/issue24 TCN 체급 미달. 현재 pipeline 승격 없이 단지별 공간 집계 구조의 근거로 유지.
+
+### 2026-07-14 - Direction-conditioned NWP grid wind OOF
+
+- duck CPU, strict outer-year. 현재 fixed optimal-grid와 geometry upwind hard1/soft3, GFS100 풍향 기준 empirical 4/8-sector router를 비교. candidate affine은 outer-train 전체에서만 학습하고 sector는 후보 선택만 담당; SCADA 없는 group3-2022는 제외.
+- pooled wind MAE mean/cubic: fixed `1.652316/1.639445`, 8-sector soft `1.590545/1.575657` (`-0.061770/-0.063788`). 8개 group-year 전부 개선했으며 fold별 mean 개선은 `0.039~0.097m/s`.
+- 4-sector soft 개선 `0.041052m/s`, 8-sector hard `0.024746m/s`; 원형 soft 보간이 가장 강함. geometry soft3/hard1은 fixed보다 `+0.087693/+0.090462m/s` 악화해 기각.
+- wind audit만 수행했고 TCN 학습/submission 없음. 다음 후보는 동일 W72 h64 weighted-L1 epoch10에서 fixed와 8-sector soft를 직접 비교.
+
+### 2026-07-14 - Direction-conditioned grid W72 TCN OOF
+
+- duck GPU, strict outer-year. W72 h64-L1 weighted-L1 epoch10, share100%, 동일 seed/71개 feature에서 fixed optimal-grid와 8-sector soft grid만 교체 비교. group3-2022는 SCADA turbine target 부재로 제외; submission 없음.
+- fixed `0.624476`을 기존 weather-bin 실험과 정확히 재현. sector8 soft `0.625176` (`+0.000700`), nMAE `0.128950→0.129200` 악화, FiCR `0.377902→0.379552` 개선.
+- pooled group delta는 g1 `+0.000281`, g2 `+0.000461`, g3 `+0.001359`였지만 group-year는 3/8만 개선. wind MAE `-0.0618m/s`가 power Score 체급으로 이어지지 않음.
+- 사전 기준 `+0.003`과 3-seed 재검증 구간 `+0.001`에 모두 미달해 기본 TCN으로 승격하지 않고 종료.
+
+### 2026-07-14 - All-grid direct ExtraTrees and outlier audit
+
+- 원본 전 변수 audit: NWP train wind에는 결측/중복/sentinel 없음. LDAPS test는 3개 시각에서 16개 격자 단위 결측이 있고 causal ffill 대상. Vestas power에는 수천만 단위 오류가 있으나 active SCADA/power-curve 경로의 용량 필터가 이미 제거함.
+- duck CPU, strict outer-year, direct normalized group target, ExtraTrees 400개. 공간 요약 64개와 grid ID를 보존한 586개 wind feature를 같은 설정으로 비교; submission 없음.
+- pooled Score: spatial summary `0.589364`, all-grid raw `0.601347` (`+0.011983`), outer-train 0.1~99.9% winsorize all-grid `0.601863` (`+0.012499`, raw 대비 `+0.000516`). clean은 8개 group-year 중 6개 개선.
+- winsorize는 feature cell 약 `0.20%`만 변경. 중요도 상위는 LDAPS grid 13/12/7/8의 `ws/ws³`; 특정 격자 위치 정보가 평균보다 유효함을 확인.
+- 단, clean standalone은 current tuned TREE `0.623611`보다 `-0.021748`. 신규 branch 승격 없이, 다음 후보는 current full TREE의 meteo/power-curve 구조에 all-grid wind block을 추가하는 것.
+
+### 2026-07-14 - Full-v2 tuned LGBM plus all-grid identity
+
+- duck CPU, TREE only. 원래 tuned LGBM trial/random state를 RNG seed `20260709`에서 정확히 복원하고, current `full_v2+power_curve` 511개에 grid ID wind 517개를 추가해 1,028개 입력으로 비교. submission 없음.
+- outer-fold 예측을 모두 연결한 공식 group-equal pooled Score: baseline `0.616624`, all-grid `0.618190` (`+0.001566`). nMAE `0.130842→0.130494`, FiCR `0.364090→0.366873`; 8개 group-year 중 7개 개선.
+- group delta: g1 `+0.003010`, g2 `+0.001088`, g3 `+0.000602`. group1-2024만 `+0.006933`으로 컸고 나머지는 대부분 작은 보정 수준.
+- 0.1~99.9% fold winsorize는 raw와 prediction max abs diff `0.0`; LGBM에서는 무효. 신규 격자 피처가 split importance 약 `36.8%`를 차지했고 GFS850 여러 격자와 LDAPS grid13이 상위였지만 체급 상승으로 이어지지 않음.
+- 역사적 TREE `0.623611`은 연도/fold 평균 방식이라 이번 pooled 절대값과 직접 비교하지 않음. 결론: full 부활은 기각; 공간정보를 다시 쓸 경우 그룹별 안정적인 소수 grid/level로 압축해야 함.
+
+### 2026-07-14 - Full data quality audit v2
+
+- 학습/submission 없이 LDAPS 30개, GFS 35개 원시 변수, SCADA 51개 센서 열, label/metadata와 TREE/PINN/current optimal-grid TCN 실입력을 전수 점검.
+- 확정 결함: full_v2 전용 compact physics의 강수 rate+누적량 단위 혼합, Vestas 개별 터빈 zero-wind outage가 wind teacher/optimal-grid target에 포함, LDAPS test 3개 결측 시각을 TCN optimal-grid가 0으로 변환.
+- LDAPS RH>100은 train 16,649/test 5,461 cells, Unison WD 고착은 최장 202.7h. full_v2 group1은 exact duplicate 41개와 train constant 5개를 포함.
+- 기존 all-grid winsor 실험은 신규 grid block만 정리해 full_v2 전체 이상치 검증이 아니었음. 상세 보고서는 `docs/data_quality_audit_v2.md`, 표는 ignored `results/data_quality_v2/`.
+
+### 2026-07-14 - Isolated zero-wind mask issue24 TCN OOF
+
+- duck GPU, strict outer-year. 자기 SCADA 풍속이 0이고 같은 단지 peer median이 3m/s 초과인 10분 관측만 결측 처리한 뒤 optimal-grid 선택/affine을 다시 학습. 기존 h128-L3 issue24, share50%와 seed는 고정; submission 없음.
+- 마스킹은 group1 `11,791`, group2 `853`, group3 `13`건. baseline `0.635941`에서 mask `0.636223` (`+0.000283`); nMAE `0.129307→0.129457` 악화, FiCR `0.401188→0.401904` 개선.
+- group-year 8개 중 4개 개선/3개 하락/1개 동일. optimal-grid 후보 변경은 46개 fold-turbine 중 1개뿐이라 selection 체급 상승보다는 calibration/학습 민감도 수준.
+- post-hoc mask 30% blend는 `0.636381` (`+0.000440`)이지만 noise 수준. 기본 파이프라인 승격과 submission은 보류.
+
+### 2026-07-14 - Mixed precipitation feature removal OOF
+
+- current quota65/TCN 입력 목록에는 `phys_ldaps_precip_sum`, `phys_gfs_precip_sum`이 없어 public-best 영향은 0. 두 피처를 실제 사용하는 dormant full_v2에서만 paired 제거 실험; submission 없음.
+- duck CPU strict outer-year, 동일 tuned LGBM. full_v2 `0.616624`, 두 피처 제거 `0.615818` (`-0.000806`); g1/g2 6개 fold 전부 하락, g3 2개 fold만 소폭 개선.
+- 개별 rate/amount 원본은 full_v2에 따로 존재. baseline split importance는 GFS mixed `80.4`, LDAPS mixed `10.4`; 제거 후 GFS total precipitation이 `57.6→100.8`로 대체됐지만 성능 미복구.
+- 결론: 차원상 잘못된 조합은 맞으나 current 경로에는 없고, full_v2에서는 유효 proxy로 작동. 코드 의미 정리는 필요하지만 성능 목적으로 제거/승격하지 않음.
+
+### 2026-07-14 - Joint group-Score loss per-turbine TCN OOF
+
+- duck GPU, outer year 미사용 고정 epoch `10/20/40`. W72 h128-L3, share50, 5~6개 per-turbine TCN을 동일 시간 batch로 묶고 `turbine L1`과 `soft group NMAE+FiCR + turbine aux 0/0.05/0.10` 비교; submission 없음.
+- fixed baseline 최고 `turbine_l1_e10=0.620295`. group-Score 최고 `aux0.10_e10=0.610351` (`-0.009944`); nMAE `0.131588→0.145486`, FiCR `0.372179→0.366188`로 모두 하락.
+- group-Score only 최고 `0.594449`; aux가 안정화에는 필요했으나 baseline 미달. epoch20/40도 회복하지 못함.
+- 결론: batch 단위 soft-FiCR를 from-scratch 주 loss로 거는 방식은 불안정해 기각. group 합산 학습 가설 자체와 단순 group L1은 아직 미검증이며 별도 실험 필요.
+
+### 2026-07-14 - Direct group cube-root target TCN OOF
+
+- duck GPU, 기존 direct group full-local W29 h128-L3와 inner-year epoch 선택 구조를 고정. 공식 group 발전률을 그대로 학습한 L1과 `cbrt(power/capacity)` L1 후 세제곱 역변환을 동일 seed로 비교; submission 없음.
+- baseline `0.617830`을 재현. cube-root `0.603408` (`-0.014422`); nMAE `0.134994→0.135625`, FiCR `0.370655→0.342442`로 특히 정산구간 적중이 크게 하락.
+- pooled group1 `0.633956→0.617358`, group2 `0.645968→0.620809`, group3 `0.573567→0.572058`; 세 group 모두 하락. 8개 group-year 중 3개만 개선했고 group1-2023은 `-0.060816`로 불안정.
+- 이 결론은 inner-year에서 고른 epoch를 outer year에 고정 적용한 결과이며, 아래 fold별 outer-validation early stopping 재실험에서 뒤집혔다. 최종 판단은 아래 결과를 우선한다.
+
+### 2026-07-14 - Group issue24 Decision-Q and cube-root OOF-selected
+
+- duck GPU, 공통 weather 64개를 한 번만 넣고 터빈별 `wake2+optimal-grid5`만 펼친 24시간 issue full-context h128-L3. 공식 group target 하나로 power L1, cube-root L1, 0.5% 후보 181개의 exact hard-Score reward Q 회귀를 비교; submission 없음.
+- 각 outer year를 validation으로 매 epoch hard Score early stopping 후 best fold prediction을 연결. power `0.627451`, cube-root `0.629280` (`+0.001829`), Decision-Q `0.573220` (`-0.054231`).
+- cube-root는 nMAE `0.132205→0.133101` 악화, FiCR `0.387107→0.391661` 개선. 8개 group-year 중 5개 개선; pooled group1 `+0.005249`, group2 `-0.001912`, group3 `+0.002149`.
+- Q는 세 group과 8개 fold 모두 하락. 유효 평가행에서도 후보 10%를 fold별 `22~29%`, 100%를 `8~19%` 선택해 내부 mode 대신 경계로 붕괴; nMAE `0.162464`, FiCR `0.308905`.
+- 결론: direct expected-reward Q 회귀는 기각. cube-root는 큰 체급 상승은 아니지만 early stopping을 fold별로 하면 유효한 FiCR-oriented target branch이며, 과거 inner-epoch 기각보다 이 결과를 우선한다.
+
+### 2026-07-14 - Group issue24 pure FiCR-band target
+
+- duck GPU, Decision-Q를 제거하고 동일 group issue24 full-context h128-L3 TCN이 발전률 하나를 직접 출력. loss는 MAE/NMAE 항 없이 발전량 가중 `0.75*soft(error<=8%)+0.25*soft(error<=6%)`만 최대화하고, fold별 hard FiCR 최고 epoch를 선택; submission 없음.
+- pooled OOF: point-power `0.627601`에서 pure-band `0.636109`로 `+0.008508`. nMAE `0.132239→0.138568` 악화, FiCR `0.387441→0.410786` (`+0.023345`) 개선. 8개 group-year 중 7개 Score 개선.
+- pooled group Score는 g1 `0.638377→0.645069`, g2 `0.656754→0.663396`, g3 `0.587672→0.599862`; worst group도 `+0.012190`.
+- 단순 6% hit는 `0.3317→0.3267`로 줄었지만 발전량 가중 6% 몫은 `0.3292→0.3499`로 증가. 평균 예측률이 `0.5281→0.5529`로 올라 저·중출력을 희생하고 75~100% capacity bin Score를 `+0.053738` 개선했다.
+- 결론: 값 중심 회귀와 FiCR 목표를 섞지 않은 specialist가 처음으로 큰 target/loss 체급 상승을 냈다. 다만 고출력 집중형이므로 독립 branch로 유지하고, 저출력 손해 및 outer-fold hard-FiCR checkpoint의 public 전이성을 다음 단계에서 확인해야 한다.
+
+### 2026-07-14 - Per-turbine PINN pure FiCR-band joint fine-tune
+
+- duck GPU, current optimal-grid/share50 h32-MLP PINN을 터빈별 point objective로 초기화한 뒤 `sum(turbine floor20%)`을 공식 group target과 비교. joint 단계는 turbine/NMAE/anchor loss 없이 pure FiCR-band만 사용하고 fold별 hard FiCR 최고 epoch를 복원; submission 없음.
+- pooled OOF floor20 baseline `0.630627`에서 pure-band `0.631688`로 `+0.001060`. nMAE `0.133562→0.133713` 악화, FiCR `0.394817→0.397088` (`+0.002271`) 개선.
+- g1/g2 6개 fold는 학습 epoch가 모두 baseline FiCR를 넘지 못해 epoch0 복원. g3-2023 `+0.000871`, g3-2024 `+0.005535`; pooled g3 `0.593433→0.596614`.
+- TCN과 달리 평균 예측률은 `0.54065→0.53801`로 감소. g3의 저출력 과대예측을 줄여 10~25% bin Score `+0.004132`, 75~100% bin은 `-0.001462`.
+- 결론: pure-band 목적은 PINN에도 유효하지만 현재 물리곡선 + bounded residual 표현력에서는 g3 보정 수준. TCN의 `+0.008508`처럼 전 group 체급 상승으로 전이되지는 않았다.
+
+### 2026-07-15 - All-branch pure-band ensemble diagnostic
+
+- duck, strict common 69,747 OOF rows. PINN point/band, quota65 old-params TREE, per-turbine issue24 TCN, group point/cube/pure-band TCN 7개를 final floor10% 후 convex ensemble. 10% simplex 8,008개 전수 탐색 + 2.5% coordinate refine; submission 없음.
+- 단순 7-way equal `0.636739`, year-held-out weight `0.639067`, all-OOF 상한 `0.640725`. all-OOF weight는 PINN point20 + issue24 TCN20 + cube TCN10 + pure-band TCN50; PINN band/TREE/group point는 0.
+- nested weight는 pred2022 `20/20/10/50`, pred2023 PINN point10 + PINN band5 + issue25 + band60, pred2024 PINN point30 + issue20 + cube32.5 + band17.5. pure-band/cube 비중의 연도 전이는 불안정.
+- nested는 pure-band TCN 단독보다 8개 group-year 중 6개 개선했지만 g1-2024 `-0.001960`, g3-2024 `-0.009172`. pooled g1/g2는 개선, g3는 `0.599718→0.598926` 하락.
+- strict target check에서 group TCN 저장 target 38행이 capacity로 clip된 것을 확인. 본 ensemble은 raw official target으로 재평가했고, 향후 group Decision-Q/pure-band evaluator도 train/validation target 상한 clip을 제거.
+- 결론: pure-band TCN 중심 다중-target family는 유효하나, 안정적인 nested 이득은 `+0.003006`(pure-band TCN 대비)이며 all-OOF optimum은 historical current-best OOF `0.640862`와 사실상 동급. TREE 다양성만으로는 낮은 체급을 상쇄하지 못해 weight 0.
+
+### 2026-07-15 - Shared-split three-target ExtraTrees OOF
+
+- duck CPU, strict outer-year. 동일 all-grid clean 586개 feature와 ExtraTrees 400개로 그룹별 독립 full-data, complete-row 독립, `[g1/cap1,g2/cap2,g3/cap3]` 단일 멀티타겟을 비교. submission 없음.
+- 기존 독립 full-data `0.601863`, complete-row 독립 `0.600942`, 멀티타겟 equal `0.600881`. 멀티타겟은 실제 교체 기준 `-0.000982`, matched 기준 `-0.000062`로 총합 이득 없음.
+- matched group3는 `0.569117→0.572225` (`+0.003108`)로 shared split transfer가 확인됐지만, group1 `-0.003018`, group2 `-0.000275`가 상쇄. group3 split scale `1.5/2.0`은 pooled `0.600638/0.600062`로 추가 악화.
+- 결론: 멀티타겟 공유 partition이 짧은 group3 이력을 돕는 가설은 맞지만 현재 ExtraTrees 본체 체급과 그룹 간 split 충돌 때문에 TREE branch 교체 후보는 아님. 결과는 `results/multioutput_extra_trees_oof_v1/`.
+
+### 2026-07-15 - Dynamic wind-state similarity GNN OOF
+
+- duck GPU, strict outer-year. 기존 거리 full-graph GNN과 동일 direct turbine/group target, weighted-L1, inner-year epoch 선택을 유지하고 매 시각 각 터빈이 cosine 기준 LDAPS1+GFS1+turbine2 메시지만 받는 one-hop gated graph를 비교. submission 없음.
+- SCADA teacher WD는 meteorological from-bearing, NWP u/v는 toward vector라 공통 상태를 `[-sin(WD),-cos(WD)]`로 수정 후 재실행. message-off 모델은 기존 direct teacher MLP와 수치적으로 동일함을 단위 테스트로 확인.
+- 공식 group-equal pooled: MLP `0.613213`, 기존 거리 GNN `0.618582`, dynamic similarity GNN `0.614642`. dynamic은 MLP 대비 `+0.001430`이지만 거리 GNN 대비 `-0.003939`.
+- group별 dynamic vs MLP / 거리 GNN: g1 `0.615977` (`+0.010740/+0.002333`), g2 `0.635607` (`-0.009119/-0.018038`), g3 `0.592343` (`+0.002668/+0.003888`). g3는 MLP 대비 2023/2024 모두 개선했지만 거리 GNN 대비 `-0.00710/+0.01511`로 연도 불안정.
+- 선택 weather cosine은 약 `0.90~0.95`로 정상. turbine cosine은 `0.995~0.998`, cross-group edge는 `11~20%`뿐이라 Top-2가 대부분 같은 단지의 거의 중복된 터빈을 선택함.
+- 결론: 동적 유사도 message 자체는 유효하고 group3 transfer도 확인됐지만, unrestricted turbine Top-2가 semantic analog보다 local duplicate로 붕괴. 현재 branch 승격은 보류하며 다음 구조 후보는 same-group 1개 + cross-group 1개 분리 또는 turbine message 제거 ablation. 결과는 `results/dynamic_similarity_gnn_oof_v1/`.
+
+### 2026-07-15 - Same-group 1 + cross-group 1 dynamic GNN
+
+- duck GPU, 위 dynamic cosine GNN의 weather LDAPS1+GFS1은 유지하고 turbine Top-2를 same-group Top-1과 cross-group Top-1로 강제 분리. 두 관계는 별도 message MLP와 gate로 처리; 나머지 loss/seed/inner-year epoch 선택 고정. submission 없음.
+- paired pooled OOF: unrestricted `0.614456`, stratified `0.611136` (`-0.003320`). group delta는 g1 `-0.001288`, g2 `-0.004860`, g3 `-0.003810`; 8개 group-year 중 2개만 개선했고 g3 2023/2024 모두 하락.
+- same-group cosine은 약 `0.995~0.998`, 강제 cross-group cosine도 g1/g2 `0.97~0.98`, g3 `0.93` 수준이었지만 예측 이득으로 이어지지 않음. 절대 풍황은 공통 NWP 때문에 쉽게 유사해져 cross-site wake/난류 analog를 식별하지 못함.
+- 기존 거리 GNN은 outer2023 선택 epoch가 `19→20`으로 한 epoch 바뀌며 pooled가 `0.618582→0.613640`으로 흔들려 checkpoint 민감도도 재확인. stratified 판단은 같은 실행의 unrestricted paired 비교를 기준으로 함.
+- 결론: same1+cross1 강제 연결은 기각. cross-site semantic edge를 다시 볼 경우 절대 풍황이 아니라 `teacher wind - local NWP wind` 같은 국지 잔차 상태로 유사도를 정의해야 함. 결과는 `results/dynamic_similarity_gnn_oof_v2_stratified/`.
+
+### 2026-07-15 - NWP grid-to-turbine attention OOF
+
+- duck GPU, strict outer-year. teacher/SCADA 없이 issue24 LDAPS/GFS를 source별 TCN으로 인코딩하고 `wind-aware grid attention -> weather-to-turbine cross-attention -> capacity group pooling`으로 3개 group을 pure FiCR-band 학습; submission 없음.
+- pooled OOF는 mean-pool `0.612893`, turbine-query `0.614965`, grid+turbine-query `0.621748`. grid+turbine은 mean 대비 `+0.008855`, 기존 거리 GNN `0.618582` 대비 `+0.003166`.
+- grid+turbine group score는 g1 `0.622955`, g2 `0.647257`, g3 `0.595034`; 세 group 모두 mean-pool보다 개선. source gate 평균은 group별 LDAPS/GFS 약 `53/47`로 한 source에 붕괴하지 않음.
+- 결론: 풍향/거리로 먼저 grid 정보를 교환한 뒤 터빈 query로 읽는 순서는 유효하나 pure-band TCN `0.636109`보다 본체 체급이 낮다. 현재 branch 교체/제출은 보류하고 구조적 ablation 기준선으로 유지. 결과는 ignored `results/nwp_turbine_attn_oof_v1_*`.
+
+### 2026-07-15 - TREE leaf-distribution hard-Score decoder
+
+- duck CPU, strict outer-year. 기존 quota65 L1 LGBM은 고정하고 128개 boosting tree의 leaf별 train-target histogram을 평균한 뒤 mean/median/q65 또는 exact expected hard Score 최대값으로 decode; submission 없음.
+- strict pooled baseline은 기존 저장 OOF `0.615246`, 재학습 L1 `0.615278`, floor10 `0.615298`로 재현. leaf mean `0.501145`, median `0.528423`, q65 `0.541146`, Score-optimal `0.574211`로 모두 크게 하락.
+- leaf mean의 valid prediction std가 L1 `0.230→0.079`로 붕괴. Score decode는 평균 예측률을 `0.512→0.605`, bias를 `+1.24%→+10.59%`로 올렸고 8% hit는 `41.41%→27.55%`로 하락.
+- 결론: boosting leaf는 단계별 residual partition이라 각 tree의 raw-target histogram 평균이 조건부 분포가 되지 않음. 이 decoder는 기각하며 다음 custom TREE는 leaf 재해석이 아니라 split/leaf update부터 Score를 직접 최적화해야 함. 실행은 `n_jobs=-1`에서 25분 이상 정체했으나 `n_jobs=8`은 전체 `42.6s`; Duck TREE는 8 threads 고정. 결과는 ignored `results/tree_leaf_score_decoder_v1_*`.
+
+### 2026-07-15 - Direct hard-Score ScoreBoost TREE OOF
+
+- duck CPU `n_jobs=8`, strict outer-year. quota65 L1+floor10을 초기값으로 두고 depth3/min-leaf400/row80%의 custom tree 20개가 exact hard NMAE+FiCR leaf delta와 split gain을 직접 최적화; 고정 checkpoint 5/10/20, submission 없음.
+- strict pooled baseline `0.615298`; ScoreBoost 5 `0.618910` (`+0.003612`), 10 `0.618422`, 20 `0.618267`. 5단계에서 nMAE `0.131563→0.133408` 악화, FiCR `0.362159→0.371227` (`+0.009068`) 개선.
+- 5단계 group delta는 g1 `+0.002426`, g2 `+0.004523`, g3 `+0.003885`; 8개 group-year 중 6개 개선. g1-2022 `-0.005650`만 큰 전이 실패, g2-2023 `-0.000051`은 동일 수준.
+- 일반 8% hit는 `41.41%→40.86%`로 감소했지만 발전량 가중 FiCR은 상승해 high-value 행을 의도대로 우선함. 첫 tree 평균 leaf 이동 `1.38%`, 5단계는 `0.28%`로 빠르게 포화; 주요 split은 시간/계절과 GFS500·850, LDAPS boundary-layer wind.
+- 결론: leaf 사후 decoder와 달리 split/leaf update부터 Score로 학습하는 방식은 TREE 체급을 실제로 올림. 다만 5단계 선택은 전체 outer OOF 진단이고 g1-2022 불안정성이 있어 현재 branch 교체 전 inner-year stage 선택/안정화 검증이 필요. 결과는 ignored `results/tree_scoreboost_oof_v1_*`.
+
+### 2026-07-15 - Group-year direct ScoreBoost hyperparameter search
+
+- nested 없이 각 `group x outer-year`의 실제 hard Score를 직접 최대화. tree 수/depth/min leaf/feature 수/row 비율/learning rate 18개 조합과 ScoreBoost off 1개를 비교했으며 Duck CPU `n_jobs=8`, 전체 `151s`; submission 없음.
+- 선택은 g1: 2022 off, 2023 leaf1000, 2024 features65; g2: 2022 features65, 2023 leaf250, 2024 lr0.10/tree10; g3: 2023 leaf250, 2024 tree3. 공통 고정 하파가 모든 group-year에 최적이지 않았음.
+- strict pooled는 LGBM floor10 `0.615298`, 고정 ScoreBoost-5 `0.618910`, group-year tuned `0.621285`. tuned는 고정 대비 `+0.002375`, baseline 대비 `+0.005987`; group score는 g1 `0.626561`, g2 `0.653877`, g3 `0.583418`.
+- 2위 대비 선택 margin은 `0.000195~0.001972`. g1-2022/2024는 비교적 명확했지만 5개 fold는 `0.001` 미만이라 세부 하파 차이는 noise에 민감함.
+- 결론: group-year별 ScoreBoost 강도 차이는 실제로 존재하고 off 후보도 필요하다. 단, outer-year 정답으로 직접 선택한 의도적 낙관 진단값이므로 일반화 OOF로 해석하지 않으며, 결과는 ignored `results/tree_scoreboost_group_year_tune_v1_*`.
+
+### 2026-07-15 - Score-TCN + PINN + TREE ablation
+
+- strict common 69,747 OOF rows에서 PINN point floor20, group pure-band TCN, TREE LGBM/fixed ScoreBoost/group-year tuned ScoreBoost를 final floor10 후 hard Score convex blend. 0.5% simplex 전수 탐색 + 0.25% refine; submission 없음.
+- 전체 공통 weight는 PINN `35.5%` + TCN `64.5%`가 `0.639035`; TREE 세 종류 모두 최적 weight `0%`. 현재 고정비중 PINN50/TCN45/TREE5는 LGBM `0.637801`, fixed `0.637830`, tuned `0.638013`으로 2-way 최적보다 낮음.
+- group별 weight를 허용하면 PINN+TCN `0.640206`, LGBM TREE `0.640352`, fixed `0.640312`, tuned `0.640429`. tuned TREE weight는 g1/g2/g3 `0.5/2.25/7.25%`, 이득은 각각 `+0.000036/+0.000389/+0.000244`; pooled `+0.000223`.
+- group-year를 정답으로 직접 최적화한 낙관 상한은 PINN+TCN `0.640895`, tuned TREE `0.642252` (`+0.001357`). 하지만 g1-2022 TREE `70.5%`, `+0.008332` 한 fold가 대부분을 만들었고, tuned `0.642252`와 원본 LGBM `0.642232` 차이는 `+0.000020`뿐.
+- tuned TREE 잔차 상관은 PINN/TCN 대비 group별 `0.89~0.94`. 결론: TREE는 조건부 미세 보완 정보는 있으나 비중의 연도 전이가 안 되고 ScoreBoost 개선도 ensemble에서는 사라짐. 현재 공통 final blend에서는 TREE를 빼는 편이 맞고, group 조건부 소량 사용도 체급 상승으로 보지 않음. 결과는 ignored `results/score_tcn_pinn_tree_ablation_v1_*`.
+
+### 2026-07-15 - PINN+Score-TCN residual LGBM stacking
+
+- Duck CPU `n_jobs=8`, strict outer-year. PINN floor20 `35.5%` + group pure-band TCN `64.5%`를 base로 두고 `(target-base)/capacity`를 group별 full_v2 NWP LGBM이 예측. SCADA empirical `power_curve_est`는 제외하고 branch ratio/base/disagreement 5개만 추가; submission 없음.
+- L2/Huber x shallow/medium/wide/smooth 8개와 correction alpha `0/2.5/5/10/15/20/25/50/75/100%`를 각 group-year 실제 hard Score로 직접 선택. baseline `0.639035`, residual stack `0.639151` (`+0.000116`). nMAE `0.134127→0.134000`, FiCR `0.412196→0.412301`.
+- 8개 fold 중 g2-2022 L2-wide `2.5%` (`+0.000435`), g2-2024 L2-smooth `2.5%` (`+0.000162`), g3-2023 Huber-shallow `2.5%` (`+0.000287`)만 residual을 사용했고 나머지 5개는 alpha 0. 25% 이상은 모든 fold에서 하락.
+- residual 예측과 outer residual 상관은 선택된 세 fold `0.199/0.152/0.072`, 전체 후보의 fold별 최대도 `0.052~0.242`. g3는 train/evaluate residual 평균이 2023 `-3.65/-8.58%`, 2024 `-8.58/-3.65%`로 정확히 뒤집혀 연도 전이가 약함.
+- 결론: 독립 TREE보다 residual 역할이 논리적으로 맞지만 현재 NWP+branch 출력으로 남은 오차를 설명하는 신호가 거의 없음. 직접 group-year 선택인데도 `+0.000116`이므로 체급 상승으로 보지 않으며 residual LGBM은 기각. 결과는 ignored `results/tree_residual_stack_oof_v2_finealpha_*`.
+
+### 2026-07-15 - Corrected full-v2 TREE + Score-TCN/PINN ablation
+
+- 이전 TREE ablation의 `tree_lgbm`은 current full_v2가 아니라 ScoreBoost 초기값인 quota65 old-params였음을 확인. Duck CPU `n_jobs=8`에서 current `full_v2 + OOF power_curve + tuned L1` 511개 feature를 strict outer-year로 재생성하고 동일 PINN/Score-TCN에 다시 결합; submission 없음.
+- full_v2 standalone strict pooled는 `0.616624`, nMAE `0.130842`, FiCR `0.364090`. 공통 69,747행 재평가는 `0.616435`; quota65 old `0.615105`보다 높지만 큰 차이는 아님.
+- PINN+TCN 공통 weight 최적 `0.639035`에 full_v2 TREE를 넣으면 최적 weight `0%`. current 고정 PINN50/TCN45/TREE5는 `0.637910` (`-0.001125`). group별 weight는 `0.640206→0.640402` (`+0.000196`), group-year 직접 최적 상한은 `0.640895→0.642147` (`+0.001252`).
+- 원인은 전체 체급이 아니라 출력 regime. target 10~25/25~50/50~75% bin에서 full_v2 FiCR은 `0.4700/0.3438/0.3820`으로 PINN+TCN base `0.4537/0.3175/0.3079`보다 모두 높음. 반면 75~100% bin은 LGBM nMAE/FiCR `0.1467/0.3238`, base `0.0999/0.5249`; 평균 예측률도 `73.3%` 대 `80.1%`로 peak를 크게 축소.
+- 결론: full_v2 LGBM은 약한 모델이 아니라 강한 low/mid-output 전문가이며, L1 중앙값/낮은 예측 분산 때문에 high-output FiCR를 잃어 uniform blend에서 배제됨. 다음 유효 구조는 LGBM 전체 제거가 아니라 예측 가능한 power regime gate로 75% 이하에서만 사용하는 conditional expert. 결과는 ignored `results/full_v2_tuned_lgbm_oof_v1/`, `results/score_tcn_pinn_tree_fullv2_ablation_v1_*`.
+
+### 2026-07-15 - Current full-v2 quantile LGBM OOF
+
+- Duck CPU `n_jobs=8`, current full_v2 511개 + OOF power-curve와 tuned TREE 하파를 고정하고 objective만 L1/q55/q60/q65로 strict outer-year 비교. mean-q60 `75/25, 50/50, 25/75` 보간도 평가; submission 없음.
+- standalone strict pooled: mean `0.616624`, q55 `0.619046`, q60 `0.620627`, q65 `0.619784`; mean25+q60 75가 `0.620846` (`+0.004223`)로 최고. q60은 nMAE `0.135220`, FiCR `0.376474`로 mean의 `0.130842/0.364090` 대비 FiCR-oriented tradeoff를 재현.
+- target bin별 mean→q65 FiCR는 10~25% `0.4689→0.3493`, 25~50% `0.3433→0.2922`, 50~75% `0.3827→0.3845`, 75~100% `0.3244→0.4104`. q65 평균 예측률은 high bin `73.4→77.4%`로 peak 축소를 완화하지만 low/mid를 과상향.
+- current PINN+Score-TCN 공통 최적 `0.639035`에 각 quantile TREE를 넣으면 q55 `0.639070` (`+0.000035`, TREE 6.25%), q60 TREE 0%, q65 `0.639120` (`+0.000085`, TREE 7.25%). 고정 PINN50/TCN45/q60 5%도 `0.638253`으로 no-TREE 최적보다 낮음.
+- group별 weight 상한은 PINN+TCN `0.640206`, q55 TREE `0.640672` (`+0.000466`). group-year 직접 상한도 q55 `0.642005`로 mean TREE `0.642147`과 tuned ScoreBoost `0.642252`보다 낮음.
+- 결론: quantile objective는 TREE standalone 체급과 peak FiCR를 확실히 올리지만, 전 구간 상향 때문에 low/mid 강점을 잃고 현재 pure-band TCN의 high-output 역할과 중복됨. uniform quantile TREE는 기각하며 다음 후보는 mean LGBM을 low/mid에서만 사용하는 예측 기반 regime gate. 결과는 ignored `results/full_v2_quantile_lgbm_oof_v1/`, `results/score_tcn_pinn_tree_quantile_ablation_v1_*`.
+
+### 2026-07-15 - PINN35.5 + pure-band Score-TCN submission v1
+
+- strict common OOF 최적 `PINN 35.5% + group pure-band TCN 64.5% = 0.639035`; 공통 TREE 최적 비중은 0%.
+- PINN은 full-data optimal-grid + RF-OOB teacher + share50 point 모델을 OOF median epoch로 재학습하고 turbine floor20% 적용. TCN은 issue24 h128-L3 pure 6/8% band 모델을 held-out year hard-FiCR early stop 후 test fold-bagging.
+- 최종은 `0.355*PINN + 0.645*TCN`, final floor10%. 8,760행/ID/BOM/결측/용량 검증 통과; final floor/capacity clip 추가 변경 0행.
+- 파일: `results/submission_pt355_stcn645_v1.csv`; SHA256 `90e7acca8fb30271d083cd33d4ef0fc9185074ad4c8c794974684f765740a55d`.
+- Public id `1492791`: score `0.6311819458`, 1-nMAE `0.8615492259`, FiCR `0.4008146657`. 현재 best 대비 `-0.0088155989`; 명확히 기각.
+- 사후 감사: 이 제출은 current jointmix에서 TREE만 제거한 동등 비교가 아니었다. PINN을 현재 코드로 재학습해 group 평균이 `-152/-136/-171kWh` drift했고, TCN을 pure-band group 모델로 교체해 `+399/+575/+714kWh` 상향됐다. `0.639035`는 pure-band 후보군 내부 최적일 뿐 current jointmix 전체보다 좋은 OOF라는 뜻이 아니었으므로 제출 판단이 잘못됐다.
+
+### 2026-07-15 - TREE horizon experts OOF
+
+- Duck CPU `n_jobs=8`, strict outer-year. current `full_v2 + OOF power_curve + tuned L1` 511개와 target 10% 학습 마스크를 고정하고 lead 12~35h를 global 1개, 6h 4개, 3h 8개 독립 LGBM으로 비교; submission 없음.
+- global `0.616624`, 6h `0.611005` (`-0.005619`), 3h `0.608657` (`-0.007967`). 6h group score도 g1/g2/g3 모두 `-0.008817/-0.006296/-0.001743` 하락.
+- 단독 대체가 아니라 expert diversity를 쓰도록 세 출력을 2.5% convex simplex로 결합. equal blend는 `0.614797`로 낮지만 공통 `global75 + expert3h25`는 `0.617351` (`+0.000728`), group별 최적은 `0.617814` (`+0.001190`).
+- group별 최적 global/6h/3h는 g1 `82.5/2.5/15`, g2 `77.5/0/22.5`, g3 `72.5/0/27.5`. 단독 최하인 3h가 모든 group에서 15~27.5% 선택되어 global과 다른 오차를 내는 diversity expert임을 확인.
+- 결론: 3h horizon expert는 global TREE 대체품으로는 실패하지만 ensemble 부품으로는 유효. 6h는 거의 중복이며 다음 평가는 `global+3h TREE`를 PINN/TCN 전체 앙상블에 넣어 최종 기여를 확인해야 함. 결과는 ignored `results/tree_horizon_expert_oof_v1_*`, `results/tree_horizon_expert_blend_v1_*`.
+
+### 2026-07-15 - Spatial CNN/MLP pure-FiCR cutoff OOF
+
+- Duck GPU strict outer-year. SCADA/teacher 없이 raw LDAPS `34x4x5` diamond-mask와 GFS `42x3x3`를 시간별 독립 처리해 3개 group을 직접 multi-target 예측. Spatial CNN 171k와 동일 입력 flattened MLP 102k를 pure68/pure6/pure4로 비교; submission 없음.
+- pooled Score는 MLP pure68 `0.628332`, pure6 `0.629405`, pure4 `0.628149`; CNN pure68 `0.619971`, pure6 `0.623564`, pure4 `0.620640`. 두 architecture 모두 pure6가 최고.
+- MLP pure6는 pure68 대비 nMAE `0.141544→0.143019`로 나빠졌지만 FiCR `0.398209→0.401830`이 올라 Score `+0.001073`. pure4는 FiCR `0.398630`으로 다시 하락해 pure6 대비 `-0.001256`.
+- 결론: 실제 최고 지급 경계인 6%를 직접 압박하는 것이 6/8 혼합보다 강하지만, 4%는 4~6% 유효 적중을 버려 coverage가 감소함. 공간 convolution은 작은/불규칙 grid에서 flat MLP보다 약했고, 신규 강한 branch 후보는 `MLP pure6`. 결과는 ignored `results/spatial_cnn_ficr_oof_v1_*`, `results/spatial_cnn_pure4_oof_v1_*`.
+
+### 2026-07-15 - MLP pure6 diversity + TCN pure6 OOF
+
+- strict common 69,747 OOF rows, final floor10%. canonical PINN floor20 + group TCN pure68의 0.5% simplex baseline은 `0.639035` (`35.5/64.5`). raw-grid multi-target MLP pure6 추가 최적은 `PINN/TCN/MLP=24.75/50.75/24.5`, `0.642032` (`+0.002997`).
+- group별 최적은 `0.642638` (`+0.003603`); MLP weight g1/g2/g3 `24.25/19.5/21.5%`. common 고정 weight도 8개 group-year fold 전부 개선, 최소 `+0.000788`, 최대 `+0.009712`.
+- 동일 group issue24 h128-L3 TCN에서 reward만 pure68에서 pure6로 바꾼 matched OOF는 pure6 `0.634750`, pure68 `0.636061`보다 `-0.001311`. PINN+TCN6도 `0.638565`로 PINN+TCN68보다 `-0.000470`.
+- TCN68/TCN6/MLP6/PINN 4-way에서 TCN6는 3%만 선택되어 2.5% coarse 기준 `0.642132`, TCN68+MLP6 3-way 대비 `+0.000114`뿐. 결론: pure6는 시간독립 raw-grid MLP의 강한 diversity branch지만 TCN에는 6/8 지급형 loss가 더 맞음. submission 없음. 결과는 ignored `results/group_pure6_tcn_oof_v1_*`, `results/pinn_tcn68_mlp6_blend_fine_v1_*`, `results/pinn_tcn_mlp_pure6_blend_v1_*`.
+
+### 2026-07-15 - Current best + MLP pure6 transfer submission
+
+- MLP pure6는 outer-year validation에서 선택된 체크포인트로 test를 즉시 예측해 3-fold bagging. 선택 epoch/score는 OOF와 동일하게 2022 `25/0.636376`, 2023 `9/0.619828`, 2024 `28/0.646440` 재현.
+- current public best를 `75.5%` 보존하고 MLP pure6를 `24.5%` 혼합, 기존 final floor10%와 capacity clip 유지. 추가 floor/capacity 변경은 0행.
+- 이 비중은 canonical PINN+TCN OOF에서 얻었으므로 current-best와 정확히 matched된 OOF 비교는 아니며, public transfer 확인용 후보임.
+- 파일: `results/submission_bm245_v1.csv`; 8,760행 검증 통과; SHA256 `92c61c809d625d0bd9393e0e21f1d13d6103995aa391fa2e777bd5ba8f7c26e5`.
+
+### 2026-07-15 - Per-turbine issue24 TCN scaler ablation
+
+- Duck GPU strict outer-year. h128-L3/share50/seed/early stop을 고정하고 train-fold scaler만 standard, per-feature MaxAbs, MinMax `[-1,1]`로 비교; submission 없음.
+- standard `0.635941` (nMAE `0.129307`, FiCR `0.401188`), MaxAbs `0.636191` (`0.132595`, `0.404978`), MinMax `0.635000` (`0.132294`, `0.402295`).
+- MaxAbs는 FiCR `+0.003790` 대신 nMAE `+0.003288` 손해로 총점 `+0.000250`; 8개 group-year 4승 4패. MinMax는 `-0.000941`.
+- 결론: 0/부호 보존 scaling이 FiCR 성향은 바꾸지만 단독 체급 상승은 아님. standard 교체 및 submission은 기각.
+
+### 2026-07-15 - Global group-target sharing TCN OOF
+
+- Duck GPU strict outer-year. optimal-grid issue context를 유지하고 먼저 3-output shared/common-residual을 비교했으나 independent Score `0.639175` 대비 shared `0.629608`, common-residual `0.631424`로 하락.
+- 이어 그룹 축을 `(issue, group) x 24h x scalar target`으로 펼친 단일 global TCN을 평가. weather profile 합집합 76개, turbine local 6-slot, slot mask, group one-hot을 사용했고 all-NaN `2022-group3` sample은 학습/평가에서 완전히 제외.
+- long-global은 pure68 `0.634326`, Score loss `0.632917`. pure68은 matched independent 대비 g1 `+0.000282`, g2 `-0.003446`, g3 `-0.004873`; Score loss는 g2만 `+0.000496`.
+- 결론: long format은 group3 결측을 원칙적으로 해결하고 공통 함수 학습을 가능하게 하지만, 현재 입력에서는 그룹 차이를 흡수하는 비용이 label 공유 이득보다 큼. 독립 모델 대체와 submission은 기각. 결과는 ignored `results/global_local_common_residual_tcn_oof_v2_*`, `results/long_global_group_tcn_oof_v1_*`.
+
+### 2026-07-15 - Rolling-origin Vestas hierarchical TCN
+
+- Duck GPU. `2022→2023`에서 pure68 모델의 hard Score 최고 epoch를 선택하고, `2022+2023`으로 처음부터 동일 epoch만큼 재학습한 뒤 2024를 한 번만 평가. 2024는 checkpoint/seed 선택에 미사용; 3 seeds bagging, submission 없음.
+- 동일 73개 Vestas weather union + 6 turbine local slots에서 g1/g2 독립 TCN과 `Vestas shared temporal encoder + g1/g2 separate heads`를 matched 비교. honest 2024 g1/g2 평균은 independent bag `0.667335`, shared bag `0.667632` (`+0.000297`).
+- shared group delta는 g1 `-0.001723`, g2 `+0.002317`; nMAE `+0.000184` 악화, FiCR `+0.000778` 개선. 제조사 공유 방향은 유효할 수 있으나 noise 수준이며 체급 상승으로 보지 않음.
+- seed 단독 2024는 independent `0.649975~0.671300`, shared `0.654114~0.664194`로 크게 흔들림. 2023 selection 순위와 2024 순위가 역전되어 best-seed 선택은 기각하고 고정 seed bagging을 유지.
+- 참고로 과거 2024 outer-validation 직접 epoch 선택 independent pure68의 g1/g2 평균은 `0.674639`; 입력이 완전 동일하진 않지만 honest forward 대비 약 `0.0073` 높아 기존 outer-selected OOF 낙관 가능성을 재확인. 결과는 ignored `results/rolling_vestas_hierarchical_tcn_v1_*`.
+
+### 2026-07-15 - Rolling-origin independent/shared submission pair
+
+- 2024 hard Score로 seed별 epoch를 고른 뒤 2022~2024 전체를 고정 epoch 재학습하고 3 seeds를 평균. g3는 2023→2024로 epoch를 고른 뒤 2023+2024 재학습했으며 두 제출에서 동일하게 사용.
+- `submission_rollind_v1.csv`는 g1/g2 독립 TCN, `submission_rollmfg_v1.csv`는 Vestas shared encoder + separate heads. 공유형-독립형 평균 차이는 g1 `-223kW`, g2 `+238kW`; 상관은 `0.9931/0.9964`.
+- 두 파일 모두 8,760행/열/유한값/용량 검증과 서버-로컬 SHA256 일치 확인. public score는 아직 없음.
+### 2026-07-16 - GEFS compact mean append TCN diagnostic
+
+- Duck GPU, current public-style weather-only TCN 설정에 GEFS ensemble mean을 23개 compact 통계 feature로 추가한 matched outer-year OOF. submission 없음.
+- baseline pooled `0.631060`, GEFS append `0.627965` (`-0.003095`). NMAE는 약 `+0.000408` 개선됐지만 FiCR은 약 `-0.006598` 하락했다.
+- baseline 90% + GEFS 10% OOF blend는 `0.631518`로 baseline 대비 `+0.000458`에 그쳐 작은 diversity만 확인했다.
+- 결론: GEFS가 약한 것이 아니라 공간장, source identity, ensemble spread를 버리고 기존 noisy input에 append한 사용 방식이 실패했다. compact append와 surface/synoptic subset 확대는 중단한다.
+- GEFS publication audit와 causal fallback은 유지한다. 다음 활성 계획은 `docs/source_expert_pipeline_plan.md`의 LDAPS/GFS/GEFS 독립 source expert 구조다.

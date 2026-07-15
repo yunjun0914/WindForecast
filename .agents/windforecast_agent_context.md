@@ -1,19 +1,37 @@
 # WindForecast Agent Context
 
-Updated: 2026-07-11 KST
+Updated: 2026-07-16 KST
 
 작업 시작 전에 `AGENTS.md`, 이 문서, `docs/best_model_usage.md`, `docs/rules.md`, `docs/exp_logs.md` 최근 항목을 읽는다.
+
+## Active Plan
+
+현재 최우선 구현 계획은 아래 문서를 기준으로 한다.
+
+```text
+docs/source_expert_pipeline_plan.md
+```
+
+핵심 방향:
+
+- LDAPS/GFS/GEFS를 처음부터 섞지 않고 source별 전문모델로 독립 학습한다.
+- `full_v2`, quota65, GEFS compact feature append를 새 source expert 입력에 사용하지 않는다.
+- 각 source의 물리적으로 최소한인 raw grid 변수에서 시작한다.
+- outer-year OOF와 동일한 fold checkpoint가 test를 직접 예측한다.
+- core 전문가 3개의 OOF를 확인하기 전에는 변수군 확장이나 submission으로 넘어가지 않는다.
 
 ## Current Public Best
 
 | Item | Value |
 |---|---|
-| File | `results/submission_pinnfloor350_pinn25_tree20_tcn55_weightedl1_finalfloor10_v1.csv` |
-| Public score | `0.6386205415` |
-| Public 1-nMAE | `0.8682636645` |
-| Public FiCR | `0.4089774184` |
-| Submit id | `1484025` |
-| Submitted at | `2026-07-11 01:21:21 KST` |
+| File | `results/submission_jointmix_p50_t5_c45_pb50_cb25_v1.csv` |
+| Public score | `0.63999` (user-reported) |
+| Structure | `PINN50 + TREE5 + TCN45` |
+| PINN floor | `0.20 * capacity` |
+| Final floor | `0.10 * capacity` |
+| Status | Current public best as of 2026-07-16 KST |
+
+`docs/best_model_usage.md`의 `0.6386205415` 모델은 과거 재현 기록이다. 현재 최고 판단은 `AGENTS.md`와 이 문서의 값을 우선한다.
 
 `results/submission.csv`는 작업용 임시 파일이다. 최고 모델로 간주하지 않는다.
 
