@@ -3038,3 +3038,10 @@ nonzero differences > 1e-9 = 0
 - GEFS mean/spread unsafe run 각각 5개; mean core는 train 3/test 2 issues를 이전 safe issue로 fallback. 최소 safe publication margin `2.4478h`.
 - train 3/test 1 issues가 calendar year를 가로질러 시간별 forecast year를 tensor에 보존했다. fold 처리 방식은 모델 실험 전에 별도 승인 필요.
 - 산출물: Duck `/home/yunjun0914/windforecast_runs/source_experts_v1/`, local ignored `results/source_experts_v1_contract/`.
+
+### 2026-07-16 - Raw source expert core OOF
+
+- commit `4596063`, seed42, outer-year OOF. source별 raw core spatial MLP -> h64 3-block full-context TCN -> 3 group heads; pure 6% 발전량 가중 reward, held-out actual hard Score checkpoint. blend/test/submission 없음.
+- pooled Score/NMAE/FiCR: LDAPS `0.622694/0.145303/0.390690`, GFS `0.610861/0.150873/0.372595`, GEFS mean `0.610921/0.152362/0.374204`.
+- cross-year 3 issues는 fold 전체 제외. GEFS fallback train issues는 fold별 `1/2/3`개 제외하고 validation에는 유지. source별 69,747 OOF행, 중복/non-finite 0.
+- LDAPS가 세 group 모두 1위지만 source residual correlation은 `0.742~0.827`로 독립 오차가 남음. 다음 source blend는 별도 승인 전 실행하지 않음. 결과는 ignored `results/source_experts_v1/`.

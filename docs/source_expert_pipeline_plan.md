@@ -489,9 +489,9 @@ promoted three-seed confirmation: additional 10-18 hours
 - [ ] current-best/OOF provenance 동결
 - [x] source contract와 raw tensor 구현
 - [x] source dataset unit tests
-- [ ] LDAPS-core 1-seed OOF
-- [ ] GFS-core 1-seed OOF
-- [ ] GEFS-mean-core 1-seed OOF
+- [x] LDAPS-core 1-seed OOF
+- [x] GFS-core 1-seed OOF
+- [x] GEFS-mean-core 1-seed OOF
 - [ ] core source ensemble
 - [ ] 변수군 ablation 승인
 - [ ] promoted model 3-seed 확인
@@ -524,6 +524,32 @@ GEFS gust:        1096/365 issues, 24h, 1 channel, 9x9
 ```text
 Duck:  /home/yunjun0914/windforecast_runs/source_experts_v1/
 Local: results/source_experts_v1_contract/
+```
+
+### Phase 2 완료 기록
+
+2026-07-16 Duck full outer-year OOF, training commit `4596063`:
+
+| Source | Score | NMAE | FiCR |
+|---|---:|---:|---:|
+| LDAPS core | 0.622694 | 0.145303 | 0.390690 |
+| GFS core | 0.610861 | 0.150873 | 0.372595 |
+| GEFS mean core | 0.610921 | 0.152362 | 0.374204 |
+
+- seed 42, pure 6% generation-weighted reward, h64 3-block full-context TCN
+- held-out-year actual hard Score checkpoint, OOF predictions pooled once by group
+- calendar year를 가로지르는 3개 issue는 train/validation 양쪽에서 issue 전체 제외
+- GEFS fallback 3개 train issue는 해당 fold의 train loss에서 제외하고 validation에는 유지
+- LDAPS가 pooled 및 세 group 모두 1위; GFS는 2022 fold에서만 LDAPS보다 높음
+- source residual correlation은 GEFS-GFS `0.8272`, GEFS-LDAPS `0.7417`, GFS-LDAPS `0.7623`
+- source별 OOF 69,747행, 중복 key 0, non-finite 0
+- blend, test prediction, submission은 실행하지 않음
+
+산출물:
+
+```text
+Duck:  /home/yunjun0914/windforecast_runs/source_experts_v1/
+Local: results/source_experts_v1/
 ```
 
 ## 13. 계획 변경 규칙

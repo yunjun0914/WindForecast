@@ -140,11 +140,13 @@ def set_seed(seed: int) -> None:
 
 
 def git_head() -> str | None:
+    repository_root = Path(__file__).resolve().parents[1]
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         check=False,
         capture_output=True,
         text=True,
+        cwd=repository_root,
     )
     return result.stdout.strip() if result.returncode == 0 else None
 
