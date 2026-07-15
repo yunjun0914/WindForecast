@@ -590,6 +590,42 @@ LDAPS standalone 대비 +0.008137
 Local: results/source_experts_v1/source_expert_convex_nested_*.csv
 ```
 
+### Phase 4 pressure 단일변수 ablation
+
+2026-07-16, code commit `0384008`. 기존 core에서 다른 설정은 고정하고 `surface_0_sp` 한 채널만 LDAPS 16개 격자와 GFS 9개 격자에 각각 추가했다. GEFS parquet에는 scalar pressure가 없어 기존 mean-core를 그대로 사용했다.
+
+Standalone:
+
+| Source | Core Score | +Surface pressure | Delta |
+|---|---:|---:|---:|
+| LDAPS | 0.622694 | 0.621934 | -0.000760 |
+| GFS | 0.610861 | 0.611738 | +0.000877 |
+
+`LDAPS-SP + GFS-SP + 기존 GEFS`를 동일 leave-one-year-out convex blend로 평가:
+
+```text
+pressure blend Score = 0.630304
+pressure blend NMAE  = 0.139408
+pressure blend FiCR  = 0.400015
+core source blend    = 0.630831
+delta                = -0.000527
+```
+
+- held-out delta는 2022 `+0.001123`, 2023 `+0.001698`, 2024 `-0.003509`
+- group delta는 g1 `-0.001789`, g2 `+0.002449`, g3 `-0.002243`
+- pressure는 g2 FiCR를 올렸지만 전체 NMAE를 `+0.001434` 악화시켜 pooled Score가 하락
+- 69,747행, 중복 key 0, non-finite 0
+- surface pressure variant는 기각하며 core source blend를 유지
+- `meanSea_0_prmsl`, GEFS pressure 추가수집, LDAPS/GFS 선택적 교체는 자동 실행하지 않음
+- test prediction과 submission 없음
+
+산출물:
+
+```text
+Duck expert OOF: /home/yunjun0914/windforecast_runs/source_experts_v1/pressure_sp_v1/
+Local blend:     results/source_experts_v1/pressure_sp_v1/
+```
+
 ## 13. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.

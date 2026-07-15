@@ -3052,3 +3052,10 @@ nonzero differences > 1e-9 = 0
 - weight LDAPS/GFS/GEFS: holdout 2022 `63.5/25.5/11.0`, 2023 `65.0/12.0/23.0`, 2024 `56.0/25.5/18.5%`. held-out Score `0.629839/0.626001/0.646325`로 LDAPS 대비 모두 개선.
 - pooled `0.630831` (NMAE `0.137974`, FiCR `0.399637`), LDAPS standalone 대비 `+0.008137`. g1/g2/g3도 각각 `+0.006924/+0.009758/+0.007730`.
 - base model까지 다시 접은 완전한 2-level nested CV는 아니므로 강한 source diversity 신호로 해석하며 unbiased 미래 성능으로 과장하지 않음. test/submission 없음. 결과는 ignored `results/source_experts_v1/source_expert_convex_nested_*`.
+
+### 2026-07-16 - Surface pressure source ablation
+
+- LDAPS/GFS core에 각각 `surface_0_sp` 한 채널만 추가하고 동일 seed42/pure6/h64 TCN outer-year OOF. GEFS는 scalar pressure 미수집으로 기존 core 유지. 다른 튜닝 없음.
+- standalone: LDAPS `0.622694→0.621934` (`-0.000760`), GFS `0.610861→0.611738` (`+0.000877`).
+- LDAPS-SP/GFS-SP/GEFS meta-year convex blend는 `0.630304` (NMAE `0.139408`, FiCR `0.400015`)로 core blend `0.630831` 대비 `-0.000527`. 2022/2023은 개선했지만 2024 `-0.003509`.
+- g2는 `+0.002449`이나 g1/g3는 `-0.001789/-0.002243`; pressure가 g2 FiCR를 올리는 대신 NMAE를 악화. 기각, test/submission 없음. 결과는 ignored `results/source_experts_v1/pressure_sp_v1/`.
