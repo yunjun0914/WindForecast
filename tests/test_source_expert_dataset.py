@@ -9,7 +9,9 @@ from utils.source_expert_dataset import (
     EXPECTED_LEADS,
     GEFS_FHOURS,
     GFS_CORE_SPEC,
+    GFS_SURFACE_PRESSURE_SPEC,
     LDAPS_CORE_SPEC,
+    LDAPS_SURFACE_PRESSURE_SPEC,
     apply_gefs_publication_fallback,
     build_gefs_mean_core_tensor,
     build_grid_source_core_tensor,
@@ -146,6 +148,28 @@ class SourceExpertDatasetTest(unittest.TestCase):
             ),
         )
 
+    def test_surface_pressure_variants_add_exactly_one_scalar_channel(self):
+        ldaps = build_grid_source_core_tensor(
+            make_grid_frame(LDAPS_SURFACE_PRESSURE_SPEC),
+            LDAPS_SURFACE_PRESSURE_SPEC,
+        )
+        gfs = build_grid_source_core_tensor(
+            make_grid_frame(GFS_SURFACE_PRESSURE_SPEC),
+            GFS_SURFACE_PRESSURE_SPEC,
+        )
+        self.assertEqual(ldaps.values.shape, (2, 24, 10, 4, 5))
+        self.assertEqual(gfs.values.shape, (2, 24, 8, 3, 3))
+        self.assertEqual(ldaps.channel_names.count("surface_0_sp"), 1)
+        self.assertEqual(gfs.channel_names.count("surface_0_sp"), 1)
+        self.assertEqual(
+            set(ldaps.channel_names) - set(LDAPS_CORE_SPEC.output_channels),
+            {"surface_0_sp"},
+        )
+        self.assertEqual(
+            set(gfs.channel_names) - set(GFS_CORE_SPEC.output_channels),
+            {"surface_0_sp"},
+        )
+
     def test_scaler_uses_selected_issues_and_shared_channel_scale(self):
         tensor = build_grid_source_core_tensor(make_grid_frame(GFS_CORE_SPEC), GFS_CORE_SPEC)
         scaler = fit_source_channel_scaler(tensor, issue_mask=np.array([True, False]))
@@ -206,4 +230,3 @@ class SourceExpertDatasetTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

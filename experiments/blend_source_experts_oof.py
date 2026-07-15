@@ -38,6 +38,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--input-dir", default="results/source_experts_v1")
     parser.add_argument("--output-dir", default="results/source_experts_v1")
+    parser.add_argument("--ldaps-file")
+    parser.add_argument("--gfs-file")
+    parser.add_argument("--gefs-file")
+    parser.add_argument("--ldaps-variant", default="ldaps_core")
+    parser.add_argument("--gfs-variant", default="gfs_core")
+    parser.add_argument("--gefs-variant", default="gefs_mean_core")
+    parser.add_argument("--nested-variant", default=NESTED_VARIANT)
+    parser.add_argument("--output-prefix", default="source_expert_convex_nested")
     return parser.parse_args()
 
 
@@ -61,17 +69,30 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def load_aligned_predictions(input_dir: Path) -> pd.DataFrame:
+def default_source_inputs(input_dir: Path) -> dict[str, tuple[Path, str]]:
+    return {
+        source: (input_dir / filename, source)
+        for source, filename in SOURCE_FILES.items()
+    }
+
+
+def load_aligned_predictions(
+    source_inputs: dict[str, tuple[Path, str]],
+) -> pd.DataFrame:
+    if tuple(source_inputs) != SOURCE_ORDER:
+        raise ValueError(f"Source input order must be {SOURCE_ORDER}")
     aligned = None
-    for source, filename in SOURCE_FILES.items():
-        path = input_dir / filename
+    for source, (path, expected_variant) in source_inputs.items():
         frame = pd.read_csv(path, encoding="utf-8-sig")
         required = [*KEY_COLUMNS, "variant", "official_target", "pred"]
         missing = [column for column in required if column not in frame.columns]
         if missing:
             raise ValueError(f"{source}: missing OOF columns {missing}")
-        if set(frame["variant"].unique()) != {source}:
-            raise ValueError(f"{source}: variant identity differs from filename")
+        if set(frame["variant"].unique()) != {expected_variant}:
+            raise ValueError(
+                f"{source}: expected variant {expected_variant}, "
+                f"got {sorted(frame['variant'].unique())}"
+            )
         if frame.duplicated(list(KEY_COLUMNS)).any():
             raise ValueError(f"{source}: duplicate OOF keys")
         selected = frame[[*KEY_COLUMNS, "official_target", "pred"]].copy()
@@ -243,7 +264,24 @@ def main() -> None:
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    aligned = load_aligned_predictions(input_dir)
+    default_inputs = default_source_inputs(input_dir)
+    source_inputs = {
+        "ldaps_core": (
+            Path(args.ldaps_file) if args.ldaps_file else default_inputs["ldaps_core"][0],
+            args.ldaps_variant,
+        ),
+        "gfs_core": (
+            Path(args.gfs_file) if args.gfs_file else default_inputs["gfs_core"][0],
+            args.gfs_variant,
+        ),
+        "gefs_mean_core": (
+            Path(args.gefs_file)
+            if args.gefs_file
+            else default_inputs["gefs_mean_core"][0],
+            args.gefs_variant,
+        ),
+    }
+    aligned = load_aligned_predictions(source_inputs)
     years = sorted(int(year) for year in aligned["pred_year"].unique())
     if years != [2022, 2023, 2024]:
         raise ValueError(f"Expected outer years 2022..2024, got {years}")
@@ -275,7 +313,7 @@ def main() -> None:
         for row in result["group_rows"]:
             fold_rows.append(
                 {
-                    "variant": NESTED_VARIANT,
+                    "variant": args.nested_variant,
                     "pred_year": held_out_year,
                     **row,
                 }
@@ -291,7 +329,7 @@ def main() -> None:
         raise RuntimeError("Nested blend did not predict every OOF row")
 
     nested = aligned[[*KEY_COLUMNS, "official_target"]].copy()
-    nested["variant"] = NESTED_VARIANT
+    nested["variant"] = args.nested_variant
     nested["pred"] = nested_prediction
     nested = nested[
         [
@@ -309,7 +347,7 @@ def main() -> None:
     source_long = []
     for source in SOURCE_ORDER:
         part = aligned[[*KEY_COLUMNS, "official_target"]].copy()
-        part["variant"] = source
+        part["variant"] = source_inputs[source][1]
         part["pred"] = aligned[f"pred_{source}"]
         source_long.append(part)
     comparison, _ = pooled_oof_summary(
@@ -320,12 +358,12 @@ def main() -> None:
     )
 
     outputs = {
-        "source_expert_convex_nested_predictions.csv": nested,
-        "source_expert_convex_nested_fold_weights.csv": pd.DataFrame(weight_rows),
-        "source_expert_convex_nested_fold_scores.csv": pd.DataFrame(fold_rows),
-        "source_expert_convex_nested_summary.csv": nested_summary,
-        "source_expert_convex_nested_group_scores.csv": nested_group_scores,
-        "source_expert_convex_nested_comparison.csv": comparison,
+        f"{args.output_prefix}_predictions.csv": nested,
+        f"{args.output_prefix}_fold_weights.csv": pd.DataFrame(weight_rows),
+        f"{args.output_prefix}_fold_scores.csv": pd.DataFrame(fold_rows),
+        f"{args.output_prefix}_summary.csv": nested_summary,
+        f"{args.output_prefix}_group_scores.csv": nested_group_scores,
+        f"{args.output_prefix}_comparison.csv": comparison,
     }
     for filename, frame in outputs.items():
         frame.to_csv(output_dir / filename, index=False, encoding="utf-8-sig")
@@ -333,7 +371,14 @@ def main() -> None:
     manifest = {
         "git_head": git_head(),
         "method": "leave-one-year-out convex source blend",
-        "sources": list(SOURCE_ORDER),
+        "sources": {
+            source: {
+                "variant": expected_variant,
+                "path": str(path),
+                "sha256": sha256(path),
+            }
+            for source, (path, expected_variant) in source_inputs.items()
+        },
         "constraints": {"nonnegative": True, "sum_to_one": True, "intercept": False},
         "weight_scope": "one common source weight vector per held-out year",
         "search": {
@@ -344,15 +389,11 @@ def main() -> None:
             "tie_break": "candidate order favors more LDAPS, then more GFS",
         },
         "folds": weight_rows,
-        "input_sha256": {
-            filename: sha256(input_dir / filename)
-            for filename in SOURCE_FILES.values()
-        },
         "test_prediction_created": False,
         "submission_created": False,
         "outputs": list(outputs),
     }
-    with (output_dir / "source_expert_convex_nested_manifest.json").open(
+    with (output_dir / f"{args.output_prefix}_manifest.json").open(
         "w", encoding="utf-8"
     ) as file:
         json.dump(manifest, file, ensure_ascii=False, indent=2)

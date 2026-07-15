@@ -28,7 +28,9 @@ from utils.metrics import (
 )
 from utils.source_expert_dataset import (
     GFS_CORE_SPEC,
+    GFS_SURFACE_PRESSURE_SPEC,
     LDAPS_CORE_SPEC,
+    LDAPS_SURFACE_PRESSURE_SPEC,
     GEFSIssueTensor,
     SourceIssueTensor,
     apply_gefs_publication_fallback,
@@ -44,11 +46,14 @@ from utils.source_expert_dataset import (
 from utils.source_expert_loss import group_balanced_pure_six_loss
 
 
-SOURCE_NAMES = ("ldaps_core", "gfs_core", "gefs_mean_core")
+CORE_SOURCE_NAMES = ("ldaps_core", "gfs_core", "gefs_mean_core")
+SOURCE_NAMES = (*CORE_SOURCE_NAMES, "ldaps_core_sp", "gfs_core_sp")
 PREDICTION_FILES = {
     "ldaps_core": "ldaps_core_oof_predictions.csv",
     "gfs_core": "gfs_core_oof_predictions.csv",
     "gefs_mean_core": "gefs_mean_core_oof_predictions.csv",
+    "ldaps_core_sp": "ldaps_core_sp_oof_predictions.csv",
+    "gfs_core_sp": "gfs_core_sp_oof_predictions.csv",
 }
 
 
@@ -119,7 +124,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Evaluate approved LDAPS/GFS/GEFS core source experts."
     )
-    parser.add_argument("--sources", default=",".join(SOURCE_NAMES))
+    parser.add_argument("--sources", default=",".join(CORE_SOURCE_NAMES))
     parser.add_argument("--ldaps-train", default="data/train/ldaps_train.csv")
     parser.add_argument("--gfs-train", default="data/train/gfs_train.csv")
     parser.add_argument("--labels", default="data/train/train_labels.csv")
@@ -177,10 +182,30 @@ def load_source_bundle(
             labels=labels,
         )
         bundle = SourceBundle(source, (tensor,))
+    elif source == "ldaps_core_sp":
+        tensor = build_grid_source_core_tensor(
+            read_source_csv(
+                args.ldaps_train,
+                source_required_columns(LDAPS_SURFACE_PRESSURE_SPEC),
+            ),
+            LDAPS_SURFACE_PRESSURE_SPEC,
+            labels=labels,
+        )
+        bundle = SourceBundle(source, (tensor,))
     elif source == "gfs_core":
         tensor = build_grid_source_core_tensor(
             read_source_csv(args.gfs_train, source_required_columns(GFS_CORE_SPEC)),
             GFS_CORE_SPEC,
+            labels=labels,
+        )
+        bundle = SourceBundle(source, (tensor,))
+    elif source == "gfs_core_sp":
+        tensor = build_grid_source_core_tensor(
+            read_source_csv(
+                args.gfs_train,
+                source_required_columns(GFS_SURFACE_PRESSURE_SPEC),
+            ),
+            GFS_SURFACE_PRESSURE_SPEC,
             labels=labels,
         )
         bundle = SourceBundle(source, (tensor,))
@@ -781,7 +806,10 @@ def main() -> None:
         "test_prediction_created": False,
         "submission_created": False,
         "source_contracts": source_manifest,
-        "outputs": [*PREDICTION_FILES.values(), *outputs.keys()],
+        "outputs": [
+            *(PREDICTION_FILES[source] for source in sources),
+            *outputs.keys(),
+        ],
     }
     with (output_dir / "source_expert_core_manifest.json").open(
         "w", encoding="utf-8"

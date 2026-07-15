@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 import pandas as pd
 
 from experiments.blend_source_experts_oof import (
     local_candidates,
+    load_aligned_predictions,
     score_prediction,
     select_nested_weights,
     simplex_candidates,
@@ -14,6 +17,37 @@ from experiments.blend_source_experts_oof import (
 
 
 class SourceExpertBlendTest(unittest.TestCase):
+    def test_loader_accepts_custom_variant_files(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_inputs = {}
+            for source, variant in [
+                ("ldaps_core", "ldaps_core_sp"),
+                ("gfs_core", "gfs_core_sp"),
+                ("gefs_mean_core", "gefs_mean_core"),
+            ]:
+                path = root / f"{variant}.csv"
+                pd.DataFrame(
+                    {
+                        "forecast_kst_dtm": ["2023-01-01 01:00:00"],
+                        "pred_year": [2023],
+                        "lead": [12],
+                        "variant": [variant],
+                        "group": ["kpx_group_1"],
+                        "official_target": [10800.0],
+                        "pred": [10800.0],
+                    }
+                ).to_csv(path, index=False)
+                source_inputs[source] = (path, variant)
+            aligned = load_aligned_predictions(source_inputs)
+            self.assertEqual(len(aligned), 1)
+            for column in (
+                "pred_ldaps_core",
+                "pred_gfs_core",
+                "pred_gefs_mean_core",
+            ):
+                self.assertIn(column, aligned.columns)
+
     def test_simplex_and_local_candidates_respect_constraints(self):
         coarse = simplex_candidates(40)
         self.assertEqual(len(coarse), 861)

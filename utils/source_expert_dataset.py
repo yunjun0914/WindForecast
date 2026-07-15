@@ -83,6 +83,14 @@ LDAPS_CORE_SPEC = GridSourceSpec(
 )
 
 
+LDAPS_SURFACE_PRESSURE_SPEC = GridSourceSpec(
+    name="ldaps_core_sp",
+    layout=LDAPS_CORE_SPEC.layout,
+    vectors=LDAPS_CORE_SPEC.vectors,
+    scalar_channels=("surface_0_sp",),
+)
+
+
 GFS_CORE_SPEC = GridSourceSpec(
     name="gfs_core",
     layout={grid_id: ((grid_id - 1) // 3, (grid_id - 1) % 3) for grid_id in range(1, 10)},
@@ -95,6 +103,14 @@ GFS_CORE_SPEC = GridSourceSpec(
         ),
     ),
     scalar_channels=("surface_0_gust",),
+)
+
+
+GFS_SURFACE_PRESSURE_SPEC = GridSourceSpec(
+    name="gfs_core_sp",
+    layout=GFS_CORE_SPEC.layout,
+    vectors=GFS_CORE_SPEC.vectors,
+    scalar_channels=(*GFS_CORE_SPEC.scalar_channels, "surface_0_sp"),
 )
 
 
