@@ -487,8 +487,8 @@ promoted three-seed confirmation: additional 10-18 hours
 - [x] 기존 pipeline과 feature 사용 방식 재점검
 - [x] source-expert 방향과 금지 사항 합의
 - [ ] current-best/OOF provenance 동결
-- [ ] source contract와 raw tensor 구현
-- [ ] source dataset unit tests
+- [x] source contract와 raw tensor 구현
+- [x] source dataset unit tests
 - [ ] LDAPS-core 1-seed OOF
 - [ ] GFS-core 1-seed OOF
 - [ ] GEFS-mean-core 1-seed OOF
@@ -497,6 +497,34 @@ promoted three-seed confirmation: additional 10-18 hours
 - [ ] promoted model 3-seed 확인
 - [ ] current-best matched OOF 비교
 - [ ] 사용자 승인 후 test submission 후보 생성
+
+### Phase 1 완료 기록
+
+2026-07-16 Duck full audit, commit `52e8ba6`:
+
+```text
+LDAPS train/test: 1096/365 issues, 24h, 9 channels, 4x5 mask with 16 points
+GFS train/test:   1096/365 issues, 24h, 7 channels, 3x3
+GEFS pressure:    1096/365 issues, 24h, 9 channels, 7x7
+GEFS gust:        1096/365 issues, 24h, 1 channel, 9x9
+```
+
+- synthetic contract/scaler/fallback unit test 5개 통과
+- LDAPS train, GFS train/test, GEFS mean core는 원본 결측 0
+- LDAPS test는 3개 issue에서 50m max/min vector 결측이 발생해 raw+speed 기준 96 cells/issue, 총 288 cells를 같은 issue 내부 시간 보간
+- 모든 tensor는 보간 후 finite이며 train/test channel/grid schema가 동일
+- GEFS mean/spread publication unsafe run은 각각 5개
+- GEFS mean fallback은 train 3 issues, test 2 issues에 적용
+- train 3 issues와 test 1 issue는 24시간 forecast가 두 calendar year에 걸침
+- cross-year issue는 삭제하거나 한 연도로 배정하지 않고 시간별 forecast year를 tensor에 보존
+- 학습, OOF, blend, submission은 실행하지 않음
+
+산출물:
+
+```text
+Duck:  /home/yunjun0914/windforecast_runs/source_experts_v1/
+Local: results/source_experts_v1_contract/
+```
 
 ## 13. 계획 변경 규칙
 

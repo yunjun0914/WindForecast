@@ -3029,3 +3029,12 @@ nonzero differences > 1e-9 = 0
 - baseline 90% + GEFS 10% OOF blend는 `0.631518`로 baseline 대비 `+0.000458`에 그쳐 작은 diversity만 확인했다.
 - 결론: GEFS가 약한 것이 아니라 공간장, source identity, ensemble spread를 버리고 기존 noisy input에 append한 사용 방식이 실패했다. compact append와 surface/synoptic subset 확대는 중단한다.
 - GEFS publication audit와 causal fallback은 유지한다. 다음 활성 계획은 `docs/source_expert_pipeline_plan.md`의 LDAPS/GFS/GEFS 독립 source expert 구조다.
+
+### 2026-07-16 - Source expert raw tensor contract audit
+
+- commit `52e8ba6`, local+Duck unit test 5개 통과. 학습/OOF/blend/submission 없음.
+- LDAPS `1096/365 x 24 x 9 x 4x5`, GFS `1096/365 x 24 x 7 x 3x3`, GEFS pressure `1096/365 x 24 x 9 x 7x7`, gust `1096/365 x 24 x 1 x 9x9` train/test 계약 검증.
+- LDAPS test 3 issues에서 raw+speed 총 288 missing cells를 동일 issue 내부 보간했고 이후 nonfinite 0. 다른 core source의 원본 결측은 0.
+- GEFS mean/spread unsafe run 각각 5개; mean core는 train 3/test 2 issues를 이전 safe issue로 fallback. 최소 safe publication margin `2.4478h`.
+- train 3/test 1 issues가 calendar year를 가로질러 시간별 forecast year를 tensor에 보존했다. fold 처리 방식은 모델 실험 전에 별도 승인 필요.
+- 산출물: Duck `/home/yunjun0914/windforecast_runs/source_experts_v1/`, local ignored `results/source_experts_v1_contract/`.
