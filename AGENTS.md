@@ -46,6 +46,9 @@ final_floor     = 0.10 * capacity
 ## Collaboration Rules
 
 - 실험이나 큰 코드 변경 전에 목적, 파이프라인, 기대 효과, 수정 파일, validation 방식, 예상 실행 시간, 결과 파일명을 사용자에게 먼저 설명한다.
+- 사용자가 승인한 실험 구성까지만 실행하고 결과가 나오면 즉시 멈춰 보고한다. 결과가 나쁘다는 이유로 weight, alpha, feature subset, loss, model size, seed, horizon, floor, clip, 후처리 또는 추가 앙상블을 임의 탐색하지 않는다.
+- 성능이 나오지 않으면 실패한 정확한 구조, 사용 데이터와 피처, 학습/validation 방식, OOF 결과 파일과 metric, 실패 해석을 그대로 보고한다. 작은 사후 튜닝으로 개선처럼 포장하지 않는다.
+- 다음 실험과 blend/grid search는 계획 문서에 이미 있더라도 실행 직전에 구체적인 탐색 범위와 비용을 설명하고 사용자 승인을 다시 받는다.
 - 사용자가 명시하지 않으면 test submission을 만들지 않는다.
 - 작은 OOF 개선만으로 제출 후보를 만들지 않는다. 큰 개선 또는 사용자 명시 요청이 필요하다.
 - 결과를 말할 때는 OOF인지 public인지, 파일명이 무엇인지 명확히 말한다.

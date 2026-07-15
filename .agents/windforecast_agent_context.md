@@ -20,6 +20,13 @@ docs/source_expert_pipeline_plan.md
 - outer-year OOF와 동일한 fold checkpoint가 test를 직접 예측한다.
 - core 전문가 3개의 OOF를 확인하기 전에는 변수군 확장이나 submission으로 넘어가지 않는다.
 
+실험 운영 원칙:
+
+- 승인받은 구성 하나까지만 실행하고 결과가 나오면 멈춰서 먼저 보고한다.
+- 실패 후 임의 blend, 비율 탐색, alpha 조정, feature subset, 하이퍼파라미터 튜닝을 이어서 하지 않는다.
+- 실패는 사용 구조와 정확한 OOF 수치를 함께 그대로 보고한다.
+- 다음 실험은 사용자 승인 이후에만 시작한다.
+
 ## Current Public Best
 
 | Item | Value |
