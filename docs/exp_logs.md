@@ -3085,6 +3085,14 @@ nonzero differences > 1e-9 = 0
 - held-out delta `+0.005196/-0.001377/-0.000729`, group delta `-0.000111/+0.003912/-0.003619`. noise 수준으로 사용자 결정 전 보류. test/submission 없음.
 - OOF: ignored `results/source_experts_v1/ldaps_5m_s1_v1_d040483/ldaps_5m_core_oof_predictions.csv`.
 
+### 2026-07-16 - LDAPS hub/BLH ratio P1 ablation
+
+- commit `7c2f344`, bear의 새 `~/.venvs/WindForecast`에서 LDAPS core에 `117/max(BLH,20)` 한 채널만 추가. raw BLH/flag/tendency/다른 thermo 입력 없음.
+- 동일 seed42/pure6/h64 strict outer-year OOF standalone `0.622694 -> 0.620155` (`-0.002539`).
+- 채택된 GFS 10m baseline 위 source blend `0.630926 -> 0.630882` (`-0.000044`); group delta `-0.002625/+0.003512/-0.001019`.
+- standalone 하락, ensemble도 개선 없음. ratio 직접입력 미채택, baseline `0.630926` 유지. test/submission 없음.
+- OOF: ignored `results/source_experts_v1/ldaps_blh_p1_v1_7c2f344/ldaps_blh_ratio_core_oof_predictions.csv`.
+
 ### 2026-07-16 - GEFS ensemble spread TREE OOF v1
 
 - 외부데이터 1호: GEFS 앙상블 mean/spread(u/v 10m·925·850·700hPa + gust)를 AWS `noaa-gefs-pds`에서 D-2 18Z cycle만 수집. run 2021-12-29~2025-12-30 49개월 결측 0, 파일별 S3 Last-Modified(공개시각) 소명 메타 저장. 수집기 `data/external/collect_gefs_ensemble.py`, 시간당 피처 `data/external/build_gefs_features.py`.

@@ -782,6 +782,51 @@ OOF:   ldaps_5m_core_oof_predictions.csv
 Blend: results/source_experts_v1/ldaps_5m_gfs_10m_s1_blend_d040483/
 ```
 
+### Phase 8 LDAPS hub/BLH ratio P1 ablation
+
+2026-07-16, code commit `7c2f344`. 사전 변수 audit에서 세 group의 단순 current-wind residual과 같은 방향의 상관을 보인 `etc_0_blh`를 아래 물리 좌표 한 채널로만 변환했다.
+
+```text
+ldaps_hub_over_blh = 117m / max(BLH, 20m)
+```
+
+raw BLH, low-BLH flag, tendency, 시간 interaction과 다른 thermo 변수는 모델 입력에 포함하지 않았다. LDAPS core의 9채널은 유지하고 ratio 한 채널만 추가했으며, 동일 seed42/pure6/h64 TCN outer-year OOF를 bear의 독립 `WindForecast` 환경에서 실행했다.
+
+Standalone:
+
+| Variant | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| LDAPS core | 0.622694 | 0.145303 | 0.390690 | - |
+| LDAPS core + hub/BLH ratio | 0.620155 | 0.145415 | 0.385725 | -0.002539 |
+
+Final source ensemble comparison은 채택된 GFS 10m baseline 위에서 수행했다.
+
+```text
+baseline = LDAPS core + GFS 10m core + GEFS mean core
+variant  = LDAPS BLH ratio core + GFS 10m core + GEFS mean core
+```
+
+| Ensemble | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| GFS 10m accepted baseline | 0.630926 | 0.137525 | 0.399378 | - |
+| LDAPS hub/BLH replacement | 0.630882 | 0.136816 | 0.398581 | -0.000044 |
+
+- held-out delta 2022/2023/2024 `+0.001186/-0.000864/+0.000185`
+- group delta g1/g2/g3 `-0.002625/+0.003512/-0.001019`
+- ensemble NMAE는 개선됐지만 FiCR 하락이 상쇄했고 g2 이득이 g1/g3 하락과 교환됨
+- standalone은 명확히 하락했고 final delta도 음수 noise 수준이므로 ratio 직접입력은 미채택
+- raw BLH, flag, tendency 등 다른 표현은 자동 실험하지 않으며 baseline은 `0.630926` 유지
+- OOF와 blend 모두 69,747행, duplicate 0, non-finite 0; test prediction과 submission 없음
+
+산출물:
+
+```text
+Bear:  /home/yunjun0914/windforecast_runs/source_experts_v1/ldaps_blh_p1_v1_7c2f344/
+Local: results/source_experts_v1/ldaps_blh_p1_v1_7c2f344/
+OOF:   ldaps_blh_ratio_core_oof_predictions.csv
+Blend: results/source_experts_v1/ldaps_blh_gfs10_blend_7c2f344/
+```
+
 ## 13. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.
