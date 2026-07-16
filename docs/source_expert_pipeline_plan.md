@@ -1360,6 +1360,35 @@ Local:    results/source_experts_v1/ldaps_representation_families_v1_<commit>/
 Blend:    results/source_experts_v1/ldaps_<family>_blend_<commit>/
 ```
 
+결과 (`3b7f914`):
+
+| Family | Standalone | Final source blend | Delta vs current baseline |
+|---|---:|---:|---:|
+| LDAPS core | 0.622694 | 0.631735 | - |
+| Circular direction | 0.623377 | 0.632749 | +0.001014 |
+| Polynomial basis | 0.624563 | 0.630377 | -0.001358 |
+| Pairwise basis | 0.624447 | 0.633467 | +0.001732 |
+| Spatial centroid | 0.625269 | 0.633129 | +0.001394 |
+| Time modulation | 0.619855 | 0.628122 | -0.003613 |
+
+진단:
+
+- Pairwise held-out delta 2022/2023/2024 `+0.001304/+0.001666/+0.002927`
+- Pairwise group delta g1/g2/g3 `+0.002671/+0.002717/-0.000193`; 세 연도는 모두 개선하고 g3는 사실상 중립
+- Spatial centroid는 standalone delta `+0.002575`로 가장 큰 신규 정보 신호. final은 2023 `-0.000975`, g1 `-0.002704`로 일부 상쇄
+- Circular는 세 연도 모두 개선했으나 g3 `-0.002161`
+- Polynomial은 standalone이 `+0.001869`지만 final에서 2023/2024와 g3가 하락하여 다른 source와 오차가 겹침
+- Time modulation은 standalone/final 모두 명확히 하락. 기존 TCN time context 위에 명시적 곱을 추가하는 방식은 미채택
+- Pairwise/Centroid/Circular의 채택 여부는 사용자 결정 전 보류. family 합본/subset 추가 탐색 없음
+- 각 OOF/blend prediction 69,747행, duplicate 0, non-finite 0. test/submission 없음
+
+실제 산출물:
+
+```text
+OOF:   results/source_experts_v1/ldaps_representation_families_v1_3b7f914/
+Blend: results/source_experts_v1/ldaps_<family>_representation_blend_3b7f914/
+```
+
 ## 18. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.

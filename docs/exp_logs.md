@@ -3170,3 +3170,11 @@ nonzero differences > 1e-9 = 0
 - 4-expert final `0.632478` (`NMAE 0.136106`, `FiCR 0.401062`): baseline 대비 `+0.000743`, 24ch 합본 대비 `+0.000512`지만 Density 단독 대비 `-0.000852`, Spatial 단독 대비 `-0.001020`.
 - held-out weight Density/Spatial/GFS/GEFS: 2022 `0.470/0.150/0.205/0.175`, 2023 `0.110/0.370/0.490/0.030`, 2024 `0.245/0.370/0.200/0.185`. 2023 held-out `0.621815` 하락.
 - 두 family 모두 nonzero weight를 받아 분리 신호는 있으나, 두 meta-train year에서 4D hard-Score weight가 불안정해 미채택. 추가 탐색/submission 없음. OOF: ignored `results/source_experts_v1/ldaps_family_experts_blend_bac7bb9/`.
+
+### 2026-07-16 - LDAPS representation-basis family ablation
+
+- commit `3b7f914`, LDAPS core 9ch 고정 후 Circular `+4`, Polynomial `+18`, Pairwise `+36`, Spatial centroid `+4`, Time modulation `+8`을 Bear RTX 4080에서 5-way 병렬 strict outer-year OOF. 신규 raw/합본/subset 없음.
+- standalone: Circular `0.623377`, Polynomial `0.624563`, Pairwise `0.624447`, Centroid `0.625269`, Time `0.619855` vs core `0.622694`.
+- current GFS combined/GEFS mean 고정 blend: Circular `0.632749` (`+0.001014`), Polynomial `0.630377` (`-0.001358`), Pairwise `0.633467` (`+0.001732`), Centroid `0.633129` (`+0.001394`), Time `0.628122` (`-0.003613`) vs baseline `0.631735`.
+- Pairwise는 세 held-out year 모두 개선하고 group delta g1/g2/g3 `+0.002671/+0.002717/-0.000193`. Centroid는 standalone 신규정보가 가장 크지만 2023/g1 하락. Polynomial은 standalone 개선이 blend에서 사라졌고 Time은 명확히 실패.
+- Pairwise/Centroid/Circular 채택 여부는 사용자 결정 대기. 모든 OOF/blend 69,747행, duplicate/non-finite 0, test/submission 없음. OOF: ignored `results/source_experts_v1/ldaps_representation_families_v1_3b7f914/`.
