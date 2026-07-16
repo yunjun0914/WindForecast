@@ -3069,6 +3069,14 @@ nonzero differences > 1e-9 = 0
 - GEFS weight도 baseline `11/23/18.5%`에서 `8/7/13.5%`로 감소. raw spread 직접입력은 현재 pipeline에 미채택하되, norm/relative/confidence 등 파생용 정보로 보류. S2/test/submission 없음.
 - OOF: ignored `results/source_experts_v1/gefs_spread_s1_v1_29f50c9/gefs_spread_core_oof_predictions.csv`.
 
+### 2026-07-16 - GFS 10m wind S1 ablation
+
+- commit `00c54f8`, GFS core에 10m `u/v/speed` 3채널만 추가. shear/gust factor 등 S2 파생 없음.
+- standalone `0.610861 -> 0.612026` (`+0.001165`).
+- LDAPS/GEFS 고정, GFS만 10m variant로 교체한 동일 meta-year convex blend는 `0.630831 -> 0.630926` (`+0.000095`).
+- ensemble group delta g1/g2/g3 `-0.000509/-0.000380/+0.001173`; noise 수준이라 baseline으로 승격하지 않고 S2 부모정보로 보류. test/submission 없음.
+- OOF: ignored `results/source_experts_v1/gfs_10m_s1_v1_00c54f8/gfs_10m_core_oof_predictions.csv`.
+
 ### 2026-07-16 - GEFS ensemble spread TREE OOF v1
 
 - 외부데이터 1호: GEFS 앙상블 mean/spread(u/v 10m·925·850·700hPa + gust)를 AWS `noaa-gefs-pds`에서 D-2 18Z cycle만 수집. run 2021-12-29~2025-12-30 49개월 결측 0, 파일별 S3 Last-Modified(공개시각) 소명 메타 저장. 수집기 `data/external/collect_gefs_ensemble.py`, 시간당 피처 `data/external/build_gefs_features.py`.

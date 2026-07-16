@@ -686,6 +686,54 @@ OOF:   gefs_spread_core_oof_predictions.csv
 Blend: results/source_experts_v1/gefs_spread_s1_blend_29f50c9/
 ```
 
+### Phase 6 GFS 10m wind S1 ablation
+
+2026-07-16, code commit `00c54f8`. GFS core의 80/100m `u/v`, gust, speed는 유지하고 10m `u/v/speed` 3채널만 추가했다.
+
+```text
+heightAboveGround_10_10u
+heightAboveGround_10_10v
+wind_10m_speed
+```
+
+100-10m shear, gust factor, direction, density 등 S2 파생은 포함하지 않았다.
+
+Standalone:
+
+| Variant | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| GFS core | 0.610861 | 0.150873 | 0.372595 | - |
+| GFS core + 10m wind | 0.612026 | 0.149284 | 0.373336 | +0.001165 |
+
+Final source ensemble comparison:
+
+```text
+baseline = LDAPS core + GFS core + GEFS mean core
+variant  = LDAPS core + GFS 10m core + GEFS mean core
+```
+
+| Ensemble | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| core source convex blend | 0.630831 | 0.137974 | 0.399637 | - |
+| GFS 10m replacement | 0.630926 | 0.137525 | 0.399378 | +0.000095 |
+
+- 동일 leave-one-year-out meta hard Score와 convex weight search 사용
+- held-out delta 2022/2023/2024 `+0.000111/-0.001130/+0.001085`
+- group delta g1/g2/g3 `-0.000509/-0.000380/+0.001173`
+- standalone은 개선됐지만 final ensemble 증가는 noise 수준이며 유지 기준 `+0.001` 미달
+- raw 10m 직접입력은 baseline으로 승격하지 않고 보류
+- 10m 정보는 100-10m shear와 gust factor의 부모 원천정보로 유지하되 S2는 자동 실행하지 않음
+- test prediction과 submission 없음
+
+산출물:
+
+```text
+Duck: /home/yunjun0914/windforecast_runs/source_experts_v1/gfs_10m_s1_v1_00c54f8/
+Local: results/source_experts_v1/gfs_10m_s1_v1_00c54f8/
+OOF:   gfs_10m_core_oof_predictions.csv
+Blend: results/source_experts_v1/gfs_10m_s1_blend_00c54f8/
+```
+
 ## 13. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.
