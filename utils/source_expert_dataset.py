@@ -264,6 +264,18 @@ GFS_THERMO_SYNOPTIC_SPEC = GridSourceSpec(
 )
 
 
+GFS_VERTICAL_THERMO_SPEC = GridSourceSpec(
+    name="gfs_vertical_thermo_core",
+    layout=GFS_CORE_SPEC.layout,
+    vectors=GFS_VERTICAL_WIND_SPEC.vectors,
+    scalar_channels=(
+        *GFS_10M_CORE_SPEC.scalar_channels,
+        *GFS_VERTICAL_WIND_EXTRA_SCALARS,
+        *GFS_THERMO_SYNOPTIC_CHANNELS,
+    ),
+)
+
+
 GFS_SURFACE_REGIME_CHANNELS = (
     "surface_0_dswrf",
     "surface_0_dlwrf",

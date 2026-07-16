@@ -15,6 +15,7 @@ from utils.source_expert_dataset import (
     GFS_SURFACE_PRESSURE_SPEC,
     GFS_THERMO_SYNOPTIC_CHANNELS,
     GFS_THERMO_SYNOPTIC_SPEC,
+    GFS_VERTICAL_THERMO_SPEC,
     GFS_VERTICAL_WIND_EXTRA_SCALARS,
     GFS_VERTICAL_WIND_EXTRA_VECTORS,
     GFS_VERTICAL_WIND_SPEC,
@@ -351,6 +352,25 @@ class SourceExpertDatasetTest(unittest.TestCase):
             set(surface.channel_names) - set(GFS_10M_CORE_SPEC.output_channels),
             set(GFS_SURFACE_REGIME_CHANNELS),
         )
+
+    def test_gfs_vertical_thermo_combined_is_the_exact_family_union(self):
+        combined = build_grid_source_core_tensor(
+            make_grid_frame(GFS_VERTICAL_THERMO_SPEC),
+            GFS_VERTICAL_THERMO_SPEC,
+        )
+
+        vertical_channels = {
+            channel
+            for vector in GFS_VERTICAL_WIND_EXTRA_VECTORS
+            for channel in (vector.u, vector.v, f"{vector.name}_speed")
+        } | set(GFS_VERTICAL_WIND_EXTRA_SCALARS)
+        expected_additions = vertical_channels | set(GFS_THERMO_SYNOPTIC_CHANNELS)
+        actual_additions = set(combined.channel_names) - set(
+            GFS_10M_CORE_SPEC.output_channels
+        )
+        self.assertEqual(combined.values.shape, (2, 24, 34, 3, 3))
+        self.assertEqual(actual_additions, expected_additions)
+        self.assertTrue(actual_additions.isdisjoint(GFS_SURFACE_REGIME_CHANNELS))
 
     def test_surface_pressure_variants_add_exactly_one_scalar_channel(self):
         ldaps = build_grid_source_core_tensor(

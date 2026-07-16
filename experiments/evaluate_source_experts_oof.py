@@ -32,6 +32,7 @@ from utils.source_expert_dataset import (
     GFS_SURFACE_REGIME_SPEC,
     GFS_SURFACE_PRESSURE_SPEC,
     GFS_THERMO_SYNOPTIC_SPEC,
+    GFS_VERTICAL_THERMO_SPEC,
     GFS_VERTICAL_WIND_SPEC,
     LDAPS_CORE_SPEC,
     LDAPS_5M_CORE_SPEC,
@@ -66,6 +67,7 @@ SOURCE_NAMES = (
     "gfs_10m_core",
     "gfs_vertical_wind_core",
     "gfs_thermo_synoptic_core",
+    "gfs_vertical_thermo_core",
     "gfs_surface_regime_core",
     "ldaps_5m_core",
     "ldaps_blh_ratio_core",
@@ -84,6 +86,7 @@ PREDICTION_FILES = {
     "gfs_10m_core": "gfs_10m_core_oof_predictions.csv",
     "gfs_vertical_wind_core": "gfs_vertical_wind_core_oof_predictions.csv",
     "gfs_thermo_synoptic_core": "gfs_thermo_synoptic_core_oof_predictions.csv",
+    "gfs_vertical_thermo_core": "gfs_vertical_thermo_core_oof_predictions.csv",
     "gfs_surface_regime_core": "gfs_surface_regime_core_oof_predictions.csv",
     "ldaps_5m_core": "ldaps_5m_core_oof_predictions.csv",
     "ldaps_blh_ratio_core": "ldaps_blh_ratio_core_oof_predictions.csv",
@@ -323,6 +326,16 @@ def load_source_bundle(
                 source_required_columns(GFS_THERMO_SYNOPTIC_SPEC),
             ),
             GFS_THERMO_SYNOPTIC_SPEC,
+            labels=labels,
+        )
+        bundle = SourceBundle(source, (tensor,))
+    elif source == "gfs_vertical_thermo_core":
+        tensor = build_grid_source_core_tensor(
+            read_source_csv(
+                args.gfs_train,
+                source_required_columns(GFS_VERTICAL_THERMO_SPEC),
+            ),
+            GFS_VERTICAL_THERMO_SPEC,
             labels=labels,
         )
         bundle = SourceBundle(source, (tensor,))
