@@ -3066,7 +3066,7 @@ nonzero differences > 1e-9 = 0
 - 동일 seed42/pure6/h64 TCN outer-year OOF에서 `0.610921 -> 0.608686` (`-0.002235`). NMAE `+0.005834` 악화, FiCR `+0.001364` 개선.
 - standalone group delta g1/g2/g3 `+0.000819/-0.004238/-0.003286`; 단독 결과만으로는 판정하지 않고 final source ensemble까지 matched 비교.
 - LDAPS/GFS 고정, GEFS mean을 spread variant로 교체한 동일 meta-year convex blend는 `0.630831 -> 0.630390` (`-0.000441`). ensemble group delta `+0.001631/+0.000124/-0.003079`.
-- GEFS weight도 baseline `11/23/18.5%`에서 `8/7/13.5%`로 감소. raw spread S1은 final ensemble 기준 기각. S2/test/submission 없음.
+- GEFS weight도 baseline `11/23/18.5%`에서 `8/7/13.5%`로 감소. raw spread 직접입력은 현재 pipeline에 미채택하되, norm/relative/confidence 등 파생용 정보로 보류. S2/test/submission 없음.
 - OOF: ignored `results/source_experts_v1/gefs_spread_s1_v1_29f50c9/gefs_spread_core_oof_predictions.csv`.
 
 ### 2026-07-16 - GEFS ensemble spread TREE OOF v1

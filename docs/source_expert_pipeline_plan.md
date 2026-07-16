@@ -673,8 +673,9 @@ variant  = LDAPS core + GFS core + GEFS mean/raw-spread core
 - group delta g1/g2/g3 `+0.001631/+0.000124/-0.003079`
 - GEFS weight는 baseline `11/23/18.5%`에서 spread variant `8/7/13.5%`로 감소
 - FiCR은 소폭 좋아졌지만 NMAE와 g3가 악화되어 최종 ensemble Score 하락
-- raw spread S1은 **최종 source ensemble 기준으로 기각**
-- S2 spread norm/relative spread는 사용자 승인 전 자동 실행하지 않음
+- raw spread 7채널 직접입력은 최종 source ensemble 기준으로 현재 pipeline에 미채택
+- spread 정보 자체는 폐기하지 않고 component norm, relative spread, confidence gating 같은 S2 파생 후보로 보류
+- S2 파생 실험은 사용자 승인 전 자동 실행하지 않음
 
 산출물:
 
