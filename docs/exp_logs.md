@@ -3146,3 +3146,11 @@ nonzero differences > 1e-9 = 0
 - `gefs_all` 19개 추가 pooled `0.614128` (`+0.001955`); 8개 group-year 중 6개 개선, pooled group delta g1 `+0.003158`/g2 `+0.000927`/g3 `+0.001781`로 세 group 모두 개선. 최대 하락은 g2-2023 `-0.003225`.
 - `gefs_spread`(spread 계열만) pooled `0.613389` (`+0.001216`, 5/8) — 기존 파이프라인에 없던 불확실성 신호의 단독 기여 확인.
 - 결론: 외부 NWP 앙상블의 첫 유효 신호. 크기는 TREE 기준 소폭이지만 전 group 일관 개선이며 spread가 실제 정보를 가짐. 다음 후보는 duck에서 tuned TREE/TCN 입력 추가와 blend-level spread 기반 regime gate. 결과: `results/tree_gefs_features_oof_v1_*`.
+
+### 2026-07-16 - LDAPS derived family ablation
+
+- commit `84a852a`, LDAPS core에 9개 파생 family를 각각 독립 추가하고 Bear에서 9개 full outer-year OOF를 병렬 실행. `50m max-speed - min-speed`는 26.6% 음수라 component midpoint와 component range norm으로 수정해 사용.
+- standalone delta: Envelope `-0.001659`, Vertical `+0.001322`, Density `+0.000476`, PBL `-0.001037`, Spatial `+0.000471`, Terrain `-0.000591`, Temporal `-0.004417`, Thermo `-0.001275`, Weather `-0.002830`.
+- current GFS combined/GEFS mean 고정 source blend delta: Envelope `-0.003649`, Vertical `-0.000331`, Density `+0.001595`, PBL `-0.001210`, Spatial `+0.001763`, Terrain `-0.000405`, Temporal `-0.003677`, Thermo `-0.000384`, Weather `-0.004105`.
+- Density와 Spatial은 세 연도·세 group 모두 개선해 채택 후보. 합본은 미실험. 나머지 direct family는 미채택.
+- 18개 prediction 파일 모두 69,747행, duplicate/non-finite 0. test/submission 없음. OOF: ignored `results/source_experts_v1/ldaps_derived_families_v1_84a852a/`.

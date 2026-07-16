@@ -1140,7 +1140,91 @@ Near blend:  results/source_experts_v1/gefs_near_spread_blend_bbd8196/
 Upper blend: results/source_experts_v1/gefs_upper_spread_blend_bbd8196/
 ```
 
-## 14. 계획 변경 규칙
+### Phase 14 LDAPS derived family ablation
+
+2026-07-16, code commit `84a852a`. LDAPS raw 점검을 마친 뒤 현재 core에 물리적으로 닫힌 파생 family 하나씩만 추가했다. 9개 family는 Bear RTX 4080 한 장에서 9개 프로세스로 병렬 실행했으며, family 합본·하위 subset·추가 튜닝은 하지 않았다.
+
+50m `max/min` component를 각각 speed로 만든 뒤 빼면 전체 행의 26.6%에서 음수가 됐다. 이는 component extrema가 같은 순간의 vector가 아니기 때문이다. Envelope와 이후 50m profile은 아래처럼 component midpoint와 component range를 사용했다.
+
+```text
+mid_u = (u_max + u_min) / 2
+mid_v = (v_max + v_min) / 2
+envelope_norm = sqrt((u_max-u_min)^2 + (v_max-v_min)^2)
+```
+
+Family 구성:
+
+| Family | 추가 채널 | 핵심 파생 |
+|---|---:|---|
+| Envelope | 7 | 50m midpoint vector/speed, component envelope, relative envelope |
+| Vertical profile | 6 | 50mid-10m 및 10-5m speed/shear/alignment |
+| Density/Power | 6 | virtual T, rho, density-equivalent wind, power density |
+| PBL/Stability | 5 | hub/BLH, BLH tendency, envelope/shear interaction, ventilation |
+| Spatial flow | 9 | grid mean/std/p90-p10, coherence, linear x/y gradient |
+| Terrain interaction | 6 | relative height, terrain plane slope, wind alignment/exposure |
+| Temporal trajectory | 10 | 1h ramp, vector turn, roll3, issue range/peak timing |
+| Thermodynamic regime | 8 | T-Td, RH deficit, pressure gap/anomaly/gradient, T/q gradient |
+| Weather regime | 9 | radiation, cloud dominance, precipitation/snow activity |
+
+Standalone:
+
+| LDAPS expert | Score | Delta vs core |
+|---|---:|---:|
+| LDAPS core | 0.622694 | - |
+| Envelope | 0.621035 | -0.001659 |
+| Vertical profile | 0.624016 | +0.001322 |
+| Density/Power | 0.623169 | +0.000476 |
+| PBL/Stability | 0.621657 | -0.001037 |
+| Spatial flow | 0.623164 | +0.000471 |
+| Terrain interaction | 0.622102 | -0.000591 |
+| Temporal trajectory | 0.618277 | -0.004417 |
+| Thermodynamic regime | 0.621419 | -0.001275 |
+| Weather regime | 0.619864 | -0.002830 |
+
+Final source blend는 사용자 결정으로 채택한 GFS Vertical/Thermo 34ch와 GEFS mean을 고정했다.
+
+| LDAPS replacement | Score | NMAE | FiCR | Delta vs current baseline |
+|---|---:|---:|---:|---:|
+| Current LDAPS core baseline | 0.631735 | 0.135818 | 0.399288 | - |
+| Envelope | 0.628086 | 0.140062 | 0.396233 | -0.003649 |
+| Vertical profile | 0.631404 | 0.137160 | 0.399967 | -0.000331 |
+| Density/Power | 0.633330 | 0.136711 | 0.403372 | +0.001595 |
+| PBL/Stability | 0.630525 | 0.137111 | 0.398160 | -0.001210 |
+| Spatial flow | 0.633498 | 0.136181 | 0.403177 | +0.001763 |
+| Terrain interaction | 0.631330 | 0.137279 | 0.399940 | -0.000405 |
+| Temporal trajectory | 0.628059 | 0.137284 | 0.393401 | -0.003677 |
+| Thermodynamic regime | 0.631351 | 0.136934 | 0.399635 | -0.000384 |
+| Weather regime | 0.627630 | 0.139859 | 0.395120 | -0.004105 |
+
+Density/Power:
+
+- held-out delta 2022/2023/2024 `+0.001087/+0.000971/+0.003094`
+- group delta g1/g2/g3 `+0.002746/+0.001747/+0.000292`
+- 세 연도와 세 group이 모두 개선되어 채택 후보
+
+Spatial flow:
+
+- held-out delta 2022/2023/2024 `+0.002718/+0.001748/+0.001098`
+- group delta g1/g2/g3 `+0.000855/+0.002659/+0.001776`
+- 세 연도와 세 group이 모두 개선되고 pooled delta가 가장 커 채택 후보
+
+나머지:
+
+- Vertical profile은 standalone `+0.001322`였지만 final blend `-0.000331`로 source complementarity 개선 없음
+- Terrain과 Thermodynamic은 특정 연도/group 개선이 있으나 pooled는 각각 `-0.000405/-0.000384`
+- Envelope, PBL, Temporal, Weather는 final blend가 명확히 하락
+- 9개 OOF와 9개 blend prediction은 각각 69,747행, duplicate 0, non-finite 0
+- Density와 Spatial 합본은 별도 승인 전 실행하지 않음. test prediction과 submission 없음
+
+산출물:
+
+```text
+Bear OOF:  /home/yunjun0914/windforecast_runs/source_experts_v1/ldaps_derived_families_v1_84a852a/
+Local OOF: results/source_experts_v1/ldaps_derived_families_v1_84a852a/
+Blend:     results/source_experts_v1/ldaps_<family>_derived_blend_84a852a/
+```
+
+## 15. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.
 
