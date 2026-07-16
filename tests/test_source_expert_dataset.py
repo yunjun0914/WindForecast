@@ -10,7 +10,14 @@ from utils.source_expert_dataset import (
     GEFS_FHOURS,
     GFS_CORE_SPEC,
     GFS_10M_CORE_SPEC,
+    GFS_SURFACE_REGIME_CHANNELS,
+    GFS_SURFACE_REGIME_SPEC,
     GFS_SURFACE_PRESSURE_SPEC,
+    GFS_THERMO_SYNOPTIC_CHANNELS,
+    GFS_THERMO_SYNOPTIC_SPEC,
+    GFS_VERTICAL_WIND_EXTRA_SCALARS,
+    GFS_VERTICAL_WIND_EXTRA_VECTORS,
+    GFS_VERTICAL_WIND_SPEC,
     LDAPS_CORE_SPEC,
     LDAPS_5M_CORE_SPEC,
     LDAPS_BLH_COLUMN,
@@ -308,6 +315,41 @@ class SourceExpertDatasetTest(unittest.TestCase):
                 "heightAboveGround_10_10v",
                 "wind_10m_speed",
             },
+        )
+
+    def test_gfs_raw_families_extend_the_accepted_10m_core(self):
+        vertical = build_grid_source_core_tensor(
+            make_grid_frame(GFS_VERTICAL_WIND_SPEC),
+            GFS_VERTICAL_WIND_SPEC,
+        )
+        thermo = build_grid_source_core_tensor(
+            make_grid_frame(GFS_THERMO_SYNOPTIC_SPEC),
+            GFS_THERMO_SYNOPTIC_SPEC,
+        )
+        surface = build_grid_source_core_tensor(
+            make_grid_frame(GFS_SURFACE_REGIME_SPEC),
+            GFS_SURFACE_REGIME_SPEC,
+        )
+
+        self.assertEqual(vertical.values.shape, (2, 24, 23, 3, 3))
+        self.assertEqual(thermo.values.shape, (2, 24, 21, 3, 3))
+        self.assertEqual(surface.values.shape, (2, 24, 18, 3, 3))
+        vertical_channels = {
+            channel
+            for vector in GFS_VERTICAL_WIND_EXTRA_VECTORS
+            for channel in (vector.u, vector.v, f"{vector.name}_speed")
+        } | set(GFS_VERTICAL_WIND_EXTRA_SCALARS)
+        self.assertEqual(
+            set(vertical.channel_names) - set(GFS_10M_CORE_SPEC.output_channels),
+            vertical_channels,
+        )
+        self.assertEqual(
+            set(thermo.channel_names) - set(GFS_10M_CORE_SPEC.output_channels),
+            set(GFS_THERMO_SYNOPTIC_CHANNELS),
+        )
+        self.assertEqual(
+            set(surface.channel_names) - set(GFS_10M_CORE_SPEC.output_channels),
+            set(GFS_SURFACE_REGIME_CHANNELS),
         )
 
     def test_surface_pressure_variants_add_exactly_one_scalar_channel(self):

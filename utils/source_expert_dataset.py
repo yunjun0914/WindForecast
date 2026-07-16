@@ -206,6 +206,85 @@ GFS_10M_CORE_SPEC = GridSourceSpec(
 )
 
 
+GFS_VERTICAL_WIND_EXTRA_VECTORS = (
+    VectorChannels(
+        "wind_pbl",
+        "planetaryBoundaryLayer_0_u",
+        "planetaryBoundaryLayer_0_v",
+    ),
+    VectorChannels(
+        "wind_850",
+        "isobaricInhPa_850_u",
+        "isobaricInhPa_850_v",
+    ),
+    VectorChannels(
+        "wind_700",
+        "isobaricInhPa_700_u",
+        "isobaricInhPa_700_v",
+    ),
+    VectorChannels(
+        "wind_500",
+        "isobaricInhPa_500_u",
+        "isobaricInhPa_500_v",
+    ),
+)
+GFS_VERTICAL_WIND_EXTRA_SCALARS = ("planetaryBoundaryLayer_0_VRATE",)
+GFS_VERTICAL_WIND_SPEC = GridSourceSpec(
+    name="gfs_vertical_wind_core",
+    layout=GFS_CORE_SPEC.layout,
+    vectors=(*GFS_10M_CORE_SPEC.vectors, *GFS_VERTICAL_WIND_EXTRA_VECTORS),
+    scalar_channels=(
+        *GFS_10M_CORE_SPEC.scalar_channels,
+        *GFS_VERTICAL_WIND_EXTRA_SCALARS,
+    ),
+)
+
+
+GFS_THERMO_SYNOPTIC_CHANNELS = (
+    "heightAboveGround_2_2t",
+    "heightAboveGround_2_2d",
+    "heightAboveGround_2_2r",
+    "heightAboveGround_2_2sh",
+    "surface_0_sp",
+    "meanSea_0_prmsl",
+    "isobaricInhPa_850_t",
+    "isobaricInhPa_850_r",
+    "isobaricInhPa_700_t",
+    "isobaricInhPa_500_t",
+    "isobaricInhPa_500_gh",
+)
+GFS_THERMO_SYNOPTIC_SPEC = GridSourceSpec(
+    name="gfs_thermo_synoptic_core",
+    layout=GFS_CORE_SPEC.layout,
+    vectors=GFS_10M_CORE_SPEC.vectors,
+    scalar_channels=(
+        *GFS_10M_CORE_SPEC.scalar_channels,
+        *GFS_THERMO_SYNOPTIC_CHANNELS,
+    ),
+)
+
+
+GFS_SURFACE_REGIME_CHANNELS = (
+    "surface_0_dswrf",
+    "surface_0_dlwrf",
+    "surface_0_prate",
+    "surface_0_tp",
+    "lowCloudLayer_0_lcc",
+    "middleCloudLayer_0_mcc",
+    "highCloudLayer_0_hcc",
+    "atmosphere_0_tcc",
+)
+GFS_SURFACE_REGIME_SPEC = GridSourceSpec(
+    name="gfs_surface_regime_core",
+    layout=GFS_CORE_SPEC.layout,
+    vectors=GFS_10M_CORE_SPEC.vectors,
+    scalar_channels=(
+        *GFS_10M_CORE_SPEC.scalar_channels,
+        *GFS_SURFACE_REGIME_CHANNELS,
+    ),
+)
+
+
 GFS_SURFACE_PRESSURE_SPEC = GridSourceSpec(
     name="gfs_core_sp",
     layout=GFS_CORE_SPEC.layout,
