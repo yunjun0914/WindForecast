@@ -1324,7 +1324,43 @@ FiCR  = 0.401062
 results/source_experts_v1/ldaps_family_experts_blend_bac7bb9/
 ```
 
-## 17. 계획 변경 규칙
+### Phase 17 LDAPS representation-basis family ablation
+
+2026-07-16 사용자 승인. 기존 LDAPS core 9ch에 신규 raw를 추가하지 않고, 같은 핵심 풍장의 비선형 표현만 family별로 독립 검증한다.
+
+| Family | Added | Total | Contract |
+|---|---:|---:|---|
+| Circular direction | 4 | 13 | 10m `cos/sin(theta)`, `cos/sin(2theta)`; 0.5m/s floor로 calm down-weight |
+| Polynomial basis | 18 | 27 | core 9ch 각각 `x^2`, `x^3` |
+| Pairwise basis | 36 | 45 | core 9ch의 unordered `x_i*x_j`, `9C2=36` |
+| Spatial centroid | 4 | 13 | 10m/50m-mid speed-weighted relative grid centroid x/y |
+| Time modulation | 8 | 17 | 10m/50m-mid speed x day/hour sin/cos |
+
+구조 판단:
+
+- 현재 time context는 lead와 day/hour sin/cos를 spatial MLP 뒤에서 concat한다.
+- `raw + time`은 기존 선형층이 표현 가능해 추가하지 않는다.
+- `raw * time`은 spatial compression 전 시간 조건부 풍장을 직접 제공하므로 별도 family로 본다.
+- 고정 grid를 펼치는 SpatialMLP에서는 raw x/y와 `x*raw`가 cell별 linear weight에 흡수되므로 직접 좌표 채널은 추가하지 않는다.
+- Spatial centroid는 좌표를 이용한 비선형 normalized moment이므로 기존 입력과 선형 중복이 아니다.
+
+Validation:
+
+- 각 family를 독립 strict outer-year OOF로 실행
+- 동일 seed/model/loss/early stopping 유지
+- 현재 GFS Vertical/Thermo와 GEFS mean을 고정한 source blend까지 평가
+- family 합본, subset, weight 후속 튜닝 없음
+- test prediction과 submission 없음
+
+계획 산출물:
+
+```text
+Bear OOF: /home/yunjun0914/windforecast_runs/source_experts_v1/ldaps_representation_families_v1_<commit>/
+Local:    results/source_experts_v1/ldaps_representation_families_v1_<commit>/
+Blend:    results/source_experts_v1/ldaps_<family>_blend_<commit>/
+```
+
+## 18. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.
 

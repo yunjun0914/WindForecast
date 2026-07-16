@@ -392,6 +392,37 @@ class SourceExpertDatasetTest(unittest.TestCase):
         )
         self.assertEqual(len(set(combined.channel_names)), 24)
 
+    def test_ldaps_representation_family_channel_counts_and_bounds(self):
+        expected_additions = {
+            "circular_direction": 4,
+            "polynomial_basis": 18,
+            "pairwise_basis": 36,
+            "spatial_centroid": 4,
+            "time_modulation": 8,
+        }
+        for family, additions in expected_additions.items():
+            with self.subTest(family=family):
+                tensor = build_ldaps_derived_family_tensor(
+                    make_ldaps_derived_frame(family),
+                    family,
+                )
+                self.assertEqual(len(tensor.channel_names), 9 + additions)
+                self.assertEqual(len(set(tensor.channel_names)), 9 + additions)
+
+        circular = build_ldaps_derived_family_tensor(
+            make_ldaps_derived_frame("circular_direction"),
+            "circular_direction",
+        )
+        circular_values = circular.values[:, :, 9:][..., circular.spatial_mask]
+        self.assertLessEqual(float(np.abs(circular_values).max()), 1.0 + 1e-6)
+
+        centroid = build_ldaps_derived_family_tensor(
+            make_ldaps_derived_frame("spatial_centroid"),
+            "spatial_centroid",
+        )
+        centroid_values = centroid.values[:, :, 9:][..., centroid.spatial_mask]
+        self.assertLessEqual(float(np.abs(centroid_values).max()), 1.0 + 1e-6)
+
     def test_gfs_core_has_only_approved_channels(self):
         tensor = build_grid_source_core_tensor(make_grid_frame(GFS_CORE_SPEC), GFS_CORE_SPEC)
 

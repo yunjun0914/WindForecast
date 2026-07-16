@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from itertools import combinations
 from pathlib import Path
 from typing import Iterable
 
@@ -176,6 +177,19 @@ LDAPS_SURFACE_REGIME_SPEC = GridSourceSpec(
 )
 
 
+LDAPS_CORE_BASIS_INPUTS = (
+    ("50m_max_u", "heightAboveGround_50_50MUmax"),
+    ("50m_max_v", "heightAboveGround_50_50MVmax"),
+    ("50m_min_u", "heightAboveGround_50_50MUmin"),
+    ("50m_min_v", "heightAboveGround_50_50MVmin"),
+    ("10m_u", "heightAboveGround_10_10u"),
+    ("10m_v", "heightAboveGround_10_10v"),
+    ("50m_max_speed", "wind_50m_max_speed"),
+    ("50m_min_speed", "wind_50m_min_speed"),
+    ("10m_speed", "wind_10m_speed"),
+)
+
+
 LDAPS_DERIVED_FAMILY_CHANNELS = {
     "envelope": (
         "ldaps_50m_mid_u",
@@ -201,6 +215,39 @@ LDAPS_DERIVED_FAMILY_CHANNELS = {
         "ldaps_density_equivalent_ws50mid",
         "ldaps_power_density_ws10",
         "ldaps_power_density_ws50mid",
+    ),
+    "circular_direction": (
+        "ldaps_ws10_direction_cos",
+        "ldaps_ws10_direction_sin",
+        "ldaps_ws10_direction_cos2",
+        "ldaps_ws10_direction_sin2",
+    ),
+    "polynomial_basis": tuple(
+        f"ldaps_poly_{alias}_{suffix}"
+        for alias, _ in LDAPS_CORE_BASIS_INPUTS
+        for suffix in ("sq", "cube")
+    ),
+    "pairwise_basis": tuple(
+        f"ldaps_pair_{left_alias}_x_{right_alias}"
+        for (left_alias, _), (right_alias, _) in combinations(
+            LDAPS_CORE_BASIS_INPUTS, 2
+        )
+    ),
+    "spatial_centroid": (
+        "ldaps_ws10_centroid_x",
+        "ldaps_ws10_centroid_y",
+        "ldaps_ws50mid_centroid_x",
+        "ldaps_ws50mid_centroid_y",
+    ),
+    "time_modulation": (
+        "ldaps_ws10_x_day_sin",
+        "ldaps_ws10_x_day_cos",
+        "ldaps_ws10_x_hour_sin",
+        "ldaps_ws10_x_hour_cos",
+        "ldaps_ws50mid_x_day_sin",
+        "ldaps_ws50mid_x_day_cos",
+        "ldaps_ws50mid_x_hour_sin",
+        "ldaps_ws50mid_x_hour_cos",
     ),
     "pbl_stability": (
         "ldaps_hub_over_blh_family",
@@ -281,6 +328,11 @@ LDAPS_DERIVED_RAW_CHANNELS = {
         "heightAboveGround_2_q",
         LDAPS_SURFACE_PRESSURE_COLUMN,
     ),
+    "circular_direction": (),
+    "polynomial_basis": (),
+    "pairwise_basis": (),
+    "spatial_centroid": (),
+    "time_modulation": (),
     "pbl_stability": (LDAPS_BLH_COLUMN,),
     "spatial_flow": (),
     "terrain_interaction": ("surface_0_h",),
@@ -897,6 +949,25 @@ def _ldaps_spatial_missing(missing: np.ndarray, mask: np.ndarray) -> np.ndarray:
     ).astype(bool)
 
 
+def _ldaps_spatial_centroid(
+    values: np.ndarray,
+    mask: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    rows, columns = np.where(mask)
+    x = columns.astype(np.float32) - float(columns.mean())
+    y = rows.astype(np.float32) - float(rows.mean())
+    x /= max(float(np.abs(x).max()), 1.0)
+    y /= max(float(np.abs(y).max()), 1.0)
+    flattened = _ldaps_spatial_values(np.maximum(values, 0.0), mask)
+    total = np.maximum(flattened.sum(axis=-1), 1e-6)
+    centroid_x = np.sum(flattened * x, axis=-1) / total
+    centroid_y = np.sum(flattened * y, axis=-1) / total
+    return (
+        _ldaps_broadcast_spatial(centroid_x, mask),
+        _ldaps_broadcast_spatial(centroid_y, mask),
+    )
+
+
 def build_ldaps_derived_family_tensor(
     frame: pd.DataFrame,
     family: str,
@@ -1080,6 +1151,72 @@ def build_ldaps_derived_family_tensor(
             0.5 * density * np.power(ws50mid, 3),
             density_missing | envelope_missing,
         )
+
+    elif family == "circular_direction":
+        direction_floor = 0.5
+        denominator = np.maximum(ws10, direction_floor)
+        direction_cos = u10 / denominator
+        direction_sin = v10 / denominator
+        direction_missing = combined_missing(u10_name, v10_name)
+        add("ldaps_ws10_direction_cos", direction_cos, direction_missing)
+        add("ldaps_ws10_direction_sin", direction_sin, direction_missing)
+        add(
+            "ldaps_ws10_direction_cos2",
+            np.square(direction_cos) - np.square(direction_sin),
+            direction_missing,
+        )
+        add(
+            "ldaps_ws10_direction_sin2",
+            2.0 * direction_cos * direction_sin,
+            direction_missing,
+        )
+
+    elif family == "polynomial_basis":
+        for alias, channel in LDAPS_CORE_BASIS_INPUTS:
+            base = value(channel)
+            squared = np.square(base)
+            add(f"ldaps_poly_{alias}_sq", squared, missing(channel))
+            add(f"ldaps_poly_{alias}_cube", squared * base, missing(channel))
+
+    elif family == "pairwise_basis":
+        for (left_alias, left_channel), (right_alias, right_channel) in combinations(
+            LDAPS_CORE_BASIS_INPUTS, 2
+        ):
+            add(
+                f"ldaps_pair_{left_alias}_x_{right_alias}",
+                value(left_channel) * value(right_channel),
+                combined_missing(left_channel, right_channel),
+            )
+
+    elif family == "spatial_centroid":
+        ws10_centroid_x, ws10_centroid_y = _ldaps_spatial_centroid(ws10, mask)
+        ws50_centroid_x, ws50_centroid_y = _ldaps_spatial_centroid(ws50mid, mask)
+        ws10_spatial_missing = _ldaps_spatial_missing(
+            missing("wind_10m_speed"), mask
+        )
+        ws50_spatial_missing = _ldaps_spatial_missing(envelope_missing, mask)
+        add("ldaps_ws10_centroid_x", ws10_centroid_x, ws10_spatial_missing)
+        add("ldaps_ws10_centroid_y", ws10_centroid_y, ws10_spatial_missing)
+        add("ldaps_ws50mid_centroid_x", ws50_centroid_x, ws50_spatial_missing)
+        add("ldaps_ws50mid_centroid_y", ws50_centroid_y, ws50_spatial_missing)
+
+    elif family == "time_modulation":
+        time_features = {
+            "day_sin": parent.time_features[..., 1, None, None],
+            "day_cos": parent.time_features[..., 2, None, None],
+            "hour_sin": parent.time_features[..., 3, None, None],
+            "hour_cos": parent.time_features[..., 4, None, None],
+        }
+        for speed_alias, speed, speed_missing in (
+            ("ws10", ws10, missing("wind_10m_speed")),
+            ("ws50mid", ws50mid, envelope_missing),
+        ):
+            for time_alias, time_values in time_features.items():
+                add(
+                    f"ldaps_{speed_alias}_x_{time_alias}",
+                    speed * time_values,
+                    speed_missing,
+                )
 
     elif family == "pbl_stability":
         blh = np.maximum(value(LDAPS_BLH_COLUMN), LDAPS_BLH_FLOOR_M)
