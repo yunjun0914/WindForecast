@@ -35,6 +35,7 @@ from utils.source_expert_dataset import (
     SourceIssueTensor,
     apply_gefs_publication_fallback,
     build_gefs_mean_core_tensor,
+    build_gefs_spread_core_tensor,
     build_grid_source_core_tensor,
     fit_source_channel_scaler,
     gefs_publication_audit,
@@ -47,11 +48,17 @@ from utils.source_expert_loss import group_balanced_pure_six_loss
 
 
 CORE_SOURCE_NAMES = ("ldaps_core", "gfs_core", "gefs_mean_core")
-SOURCE_NAMES = (*CORE_SOURCE_NAMES, "ldaps_core_sp", "gfs_core_sp")
+SOURCE_NAMES = (
+    *CORE_SOURCE_NAMES,
+    "gefs_spread_core",
+    "ldaps_core_sp",
+    "gfs_core_sp",
+)
 PREDICTION_FILES = {
     "ldaps_core": "ldaps_core_oof_predictions.csv",
     "gfs_core": "gfs_core_oof_predictions.csv",
     "gefs_mean_core": "gefs_mean_core_oof_predictions.csv",
+    "gefs_spread_core": "gefs_spread_core_oof_predictions.csv",
     "ldaps_core_sp": "ldaps_core_sp_oof_predictions.csv",
     "gfs_core_sp": "gfs_core_sp_oof_predictions.csv",
 }
@@ -209,10 +216,29 @@ def load_source_bundle(
             labels=labels,
         )
         bundle = SourceBundle(source, (tensor,))
-    elif source == "gefs_mean_core":
-        pressure, gust = load_gefs_core_frames(args.gefs_root)
-        gefs_all = build_gefs_mean_core_tensor(pressure, gust, labels=labels)
+    elif source in ("gefs_mean_core", "gefs_spread_core"):
+        include_spread = source == "gefs_spread_core"
+        pressure, gust = load_gefs_core_frames(
+            args.gefs_root,
+            include_spread=include_spread,
+        )
+        builder = (
+            build_gefs_spread_core_tensor
+            if include_spread
+            else build_gefs_mean_core_tensor
+        )
+        gefs_all = builder(pressure, gust, labels=labels)
         publication = gefs_publication_audit(args.gefs_root, kind="geavg")
+        if include_spread:
+            spread_publication = gefs_publication_audit(
+                args.gefs_root,
+                kind="gespr",
+            )
+            spread_safe = spread_publication.set_index("data_available_kst_dtm")["safe"]
+            publication = publication.copy()
+            publication["safe"] = publication["safe"] & publication[
+                "data_available_kst_dtm"
+            ].map(spread_safe).fillna(False)
         gefs_all = apply_gefs_publication_fallback(gefs_all, publication)
         issue_times = (
             pd.read_csv(
@@ -332,7 +358,7 @@ def model_configuration(
     bundle: SourceBundle,
     config: ExperimentConfig,
 ) -> SourceExpertTCN:
-    if bundle.name == "gefs_mean_core":
+    if bundle.name in ("gefs_mean_core", "gefs_spread_core"):
         hidden_sizes = [64, 16]
         embedding_sizes = [64, 16]
     else:

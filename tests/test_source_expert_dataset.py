@@ -14,6 +14,7 @@ from utils.source_expert_dataset import (
     LDAPS_SURFACE_PRESSURE_SPEC,
     apply_gefs_publication_fallback,
     build_gefs_mean_core_tensor,
+    build_gefs_spread_core_tensor,
     build_grid_source_core_tensor,
     fit_source_channel_scaler,
     select_gefs_issues,
@@ -61,6 +62,14 @@ def make_gefs_frames(run_count=2):
         "u850_mean",
         "v850_mean",
     )
+    pressure_spread_channels = (
+        "u10m_sprd",
+        "v10m_sprd",
+        "u925_sprd",
+        "v925_sprd",
+        "u850_sprd",
+        "v850_sprd",
+    )
     for run_index in range(run_count):
         run_date = pd.Timestamp("2021-12-30") + pd.Timedelta(days=run_index)
         for fhour in GEFS_FHOURS:
@@ -81,6 +90,14 @@ def make_gefs_frames(run_count=2):
                             + 0.01 * lat
                             + 0.001 * lon
                         )
+                    for channel_index, channel in enumerate(pressure_spread_channels):
+                        row[channel] = (
+                            10.0
+                            + channel_index
+                            + 0.1 * run_index
+                            + 0.01 * source_lead
+                            + 0.0001 * lat
+                        )
                     pressure_rows.append(row)
             for lat in gust_lats:
                 for lon in gust_lons:
@@ -95,6 +112,12 @@ def make_gefs_frames(run_count=2):
                                 + source_lead
                                 + 0.01 * lat
                                 + 0.001 * lon
+                            ),
+                            "gust_sprd": (
+                                5.0
+                                + 0.1 * run_index
+                                + 0.01 * source_lead
+                                + 0.0001 * lat
                             ),
                         }
                     )
@@ -203,6 +226,31 @@ class SourceExpertDatasetTest(unittest.TestCase):
             expected,
             places=4,
         )
+
+    def test_gefs_spread_core_adds_only_seven_raw_spread_channels(self):
+        pressure, gust = make_gefs_frames()
+        mean = build_gefs_mean_core_tensor(pressure, gust)
+        spread = build_gefs_spread_core_tensor(pressure, gust)
+
+        self.assertEqual(spread.pressure.values.shape, (2, 24, 15, 7, 7))
+        self.assertEqual(spread.gust.values.shape, (2, 24, 2, 9, 9))
+        self.assertEqual(
+            set(spread.pressure.channel_names) - set(mean.pressure.channel_names),
+            {
+                "u10m_sprd",
+                "v10m_sprd",
+                "u925_sprd",
+                "v925_sprd",
+                "u850_sprd",
+                "v850_sprd",
+            },
+        )
+        self.assertEqual(
+            set(spread.gust.channel_names) - set(mean.gust.channel_names),
+            {"gust_sprd"},
+        )
+        self.assertFalse(any("relative" in name for name in spread.pressure.channel_names))
+        self.assertFalse(any("speed" in name for name in spread.pressure.channel_names[6:12]))
 
     def test_gefs_publication_fallback_copies_prior_safe_issue(self):
         pressure, gust = make_gefs_frames()
