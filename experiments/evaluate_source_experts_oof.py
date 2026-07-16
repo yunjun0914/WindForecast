@@ -37,6 +37,7 @@ from utils.source_expert_dataset import (
     GEFS_NEAR_SPREAD_VECTORS,
     GEFS_UPPER_SPREAD_VECTORS,
     LDAPS_CORE_SPEC,
+    LDAPS_DERIVED_SOURCE_FAMILIES,
     LDAPS_5M_CORE_SPEC,
     LDAPS_MSLP_SPEC,
     LDAPS_SURFACE_REGIME_SPEC,
@@ -52,11 +53,13 @@ from utils.source_expert_dataset import (
     build_gefs_upper_spread_core_tensor,
     build_grid_source_core_tensor,
     build_ldaps_blh_ratio_tensor,
+    build_ldaps_derived_family_tensor,
     build_ldaps_pressure_tendency_tensor,
     fit_source_channel_scaler,
     gefs_publication_audit,
     load_gefs_core_frames,
     ldaps_blh_ratio_required_columns,
+    ldaps_derived_family_required_columns,
     ldaps_pressure_tendency_required_columns,
     select_gefs_issues,
     source_required_columns,
@@ -78,6 +81,7 @@ SOURCE_NAMES = (
     "gfs_vertical_thermo_core",
     "gfs_surface_regime_core",
     "ldaps_5m_core",
+    *LDAPS_DERIVED_SOURCE_FAMILIES,
     "ldaps_blh_ratio_core",
     "ldaps_pressure_tendency_core",
     "ldaps_mslp_core",
@@ -100,6 +104,10 @@ PREDICTION_FILES = {
     "gfs_vertical_thermo_core": "gfs_vertical_thermo_core_oof_predictions.csv",
     "gfs_surface_regime_core": "gfs_surface_regime_core_oof_predictions.csv",
     "ldaps_5m_core": "ldaps_5m_core_oof_predictions.csv",
+    **{
+        source: f"{source}_oof_predictions.csv"
+        for source in LDAPS_DERIVED_SOURCE_FAMILIES
+    },
     "ldaps_blh_ratio_core": "ldaps_blh_ratio_core_oof_predictions.csv",
     "ldaps_pressure_tendency_core": "ldaps_pressure_tendency_core_oof_predictions.csv",
     "ldaps_mslp_core": "ldaps_mslp_core_oof_predictions.csv",
@@ -232,6 +240,17 @@ def load_source_bundle(
                 args.ldaps_train, source_required_columns(LDAPS_CORE_SPEC)
             ),
             LDAPS_CORE_SPEC,
+            labels=labels,
+        )
+        bundle = SourceBundle(source, (tensor,))
+    elif source in LDAPS_DERIVED_SOURCE_FAMILIES:
+        family = LDAPS_DERIVED_SOURCE_FAMILIES[source]
+        tensor = build_ldaps_derived_family_tensor(
+            read_source_csv(
+                args.ldaps_train,
+                ldaps_derived_family_required_columns(family),
+            ),
+            family,
             labels=labels,
         )
         bundle = SourceBundle(source, (tensor,))

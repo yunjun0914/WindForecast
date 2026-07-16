@@ -176,6 +176,125 @@ LDAPS_SURFACE_REGIME_SPEC = GridSourceSpec(
 )
 
 
+LDAPS_DERIVED_FAMILY_CHANNELS = {
+    "envelope": (
+        "ldaps_50m_mid_u",
+        "ldaps_50m_mid_v",
+        "ldaps_50m_mid_speed",
+        "ldaps_50m_envelope_u",
+        "ldaps_50m_envelope_v",
+        "ldaps_50m_envelope_norm",
+        "ldaps_50m_relative_envelope",
+    ),
+    "vertical_profile": (
+        "ldaps_50m_mid_minus_10m_speed",
+        "ldaps_50m_mid_10m_log_shear",
+        "ldaps_50m_mid_10m_alignment",
+        "ldaps_10m_minus_5m_speed",
+        "ldaps_10m_5m_log_shear",
+        "ldaps_10m_5m_alignment",
+    ),
+    "density_power": (
+        "ldaps_virtual_temperature",
+        "ldaps_air_density",
+        "ldaps_density_equivalent_ws10",
+        "ldaps_density_equivalent_ws50mid",
+        "ldaps_power_density_ws10",
+        "ldaps_power_density_ws50mid",
+    ),
+    "pbl_stability": (
+        "ldaps_hub_over_blh_family",
+        "ldaps_blh_tendency_3h_family",
+        "ldaps_envelope_x_hub_over_blh",
+        "ldaps_shear_x_hub_over_blh",
+        "ldaps_ventilation_proxy",
+    ),
+    "spatial_flow": (
+        "ldaps_spatial_ws10_mean",
+        "ldaps_spatial_ws10_std",
+        "ldaps_spatial_ws10_p90_p10",
+        "ldaps_spatial_ws10_coherence",
+        "ldaps_spatial_ws10_gradient_x",
+        "ldaps_spatial_ws10_gradient_y",
+        "ldaps_spatial_ws50mid_mean",
+        "ldaps_spatial_ws50mid_std",
+        "ldaps_spatial_ws50mid_p90_p10",
+    ),
+    "terrain_interaction": (
+        "ldaps_terrain_relative_height",
+        "ldaps_terrain_slope_x",
+        "ldaps_terrain_slope_y",
+        "ldaps_terrain_slope_magnitude",
+        "ldaps_terrain_wind_alignment",
+        "ldaps_terrain_wind_exposure",
+    ),
+    "temporal_trajectory": (
+        "ldaps_ws10_ramp_1h",
+        "ldaps_ws10_vector_ramp_1h",
+        "ldaps_ws10_direction_turn_1h",
+        "ldaps_ws50mid_ramp_1h",
+        "ldaps_envelope_ramp_1h",
+        "ldaps_ws10_roll3_mean",
+        "ldaps_ws10_roll3_std",
+        "ldaps_ws50mid_roll3_mean",
+        "ldaps_ws10_issue_range",
+        "ldaps_ws10_hours_to_peak",
+    ),
+    "thermodynamic_regime": (
+        "ldaps_dewpoint_depression",
+        "ldaps_relative_humidity_deficit",
+        "ldaps_mslp_surface_gap",
+        "ldaps_surface_pressure_anomaly",
+        "ldaps_surface_pressure_gradient_x",
+        "ldaps_surface_pressure_gradient_y",
+        "ldaps_temperature_gradient_magnitude",
+        "ldaps_specific_humidity_anomaly",
+    ),
+    "weather_regime": (
+        "ldaps_shortwave_total",
+        "ldaps_shortwave_direct_fraction",
+        "ldaps_net_radiation_proxy",
+        "ldaps_cloud_layer_mean",
+        "ldaps_low_cloud_dominance",
+        "ldaps_precip_log_activity",
+        "ldaps_precip_occurrence",
+        "ldaps_snow_log_activity",
+        "ldaps_snow_occurrence",
+    ),
+}
+LDAPS_DERIVED_SOURCE_FAMILIES = {
+    f"ldaps_{family}_derived_core": family
+    for family in LDAPS_DERIVED_FAMILY_CHANNELS
+}
+LDAPS_DERIVED_RAW_CHANNELS = {
+    "envelope": (),
+    "vertical_profile": (
+        "heightAboveGround_5_XBLWS",
+        "heightAboveGround_5_YBLWS",
+    ),
+    "density_power": (
+        "heightAboveGround_2_t",
+        "heightAboveGround_2_q",
+        LDAPS_SURFACE_PRESSURE_COLUMN,
+    ),
+    "pbl_stability": (LDAPS_BLH_COLUMN,),
+    "spatial_flow": (),
+    "terrain_interaction": ("surface_0_h",),
+    "temporal_trajectory": (),
+    "thermodynamic_regime": (
+        "heightAboveGround_2_t",
+        "heightAboveGround_2_dpt",
+        "heightAboveGround_2_r",
+        "heightAboveGround_2_q",
+        LDAPS_SURFACE_PRESSURE_COLUMN,
+        LDAPS_MSLP_COLUMN,
+    ),
+    "weather_regime": tuple(
+        channel for channel in LDAPS_SURFACE_REGIME_CHANNELS if channel != "surface_0_h"
+    ),
+}
+
+
 GFS_CORE_SPEC = GridSourceSpec(
     name="gfs_core",
     layout={grid_id: ((grid_id - 1) // 3, (grid_id - 1) % 3) for grid_id in range(1, 10)},
@@ -411,6 +530,17 @@ def ldaps_blh_ratio_required_columns() -> tuple[str, ...]:
 
 def ldaps_pressure_tendency_required_columns() -> tuple[str, ...]:
     return source_required_columns(LDAPS_SURFACE_PRESSURE_SPEC)
+
+
+def ldaps_derived_family_required_columns(family: str) -> tuple[str, ...]:
+    if family not in LDAPS_DERIVED_RAW_CHANNELS:
+        raise ValueError(f"Unknown LDAPS derived family: {family}")
+    raw_channels = tuple(
+        dict.fromkeys(
+            (*LDAPS_CORE_SPEC.raw_channels, *LDAPS_DERIVED_RAW_CHANNELS[family])
+        )
+    )
+    return (*TIME_KEY_COLS, "grid_id", *raw_channels)
 
 
 def _time_features(forecast_times: np.ndarray, issue_times: np.ndarray) -> np.ndarray:
@@ -659,6 +789,501 @@ def build_ldaps_pressure_tendency_tensor(
         values=np.stack(value_channels, axis=2).astype(np.float32),
         missing_mask=np.stack(missing_channels, axis=2),
         channel_names=LDAPS_PRESSURE_TENDENCY_SPEC.output_channels,
+    )
+    tensor.validate()
+    return tensor
+
+
+def _ldaps_safe_alignment(
+    left_u: np.ndarray,
+    left_v: np.ndarray,
+    right_u: np.ndarray,
+    right_v: np.ndarray,
+) -> np.ndarray:
+    denominator = np.maximum(
+        np.hypot(left_u, left_v) * np.hypot(right_u, right_v),
+        0.25,
+    )
+    return np.clip(
+        (left_u * right_u + left_v * right_v) / denominator,
+        -1.0,
+        1.0,
+    ).astype(np.float32)
+
+
+def _ldaps_centered_slope(values: np.ndarray, radius: int) -> np.ndarray:
+    steps = np.arange(values.shape[1])
+    left = np.maximum(steps - radius, 0)
+    right = np.minimum(steps + radius, values.shape[1] - 1)
+    elapsed = (right - left).astype(np.float32)
+    return ((values[:, right] - values[:, left]) / elapsed[None, :, None, None]).astype(
+        np.float32
+    )
+
+
+def _ldaps_centered_missing(missing: np.ndarray, radius: int) -> np.ndarray:
+    steps = np.arange(missing.shape[1])
+    left = np.maximum(steps - radius, 0)
+    right = np.minimum(steps + radius, missing.shape[1] - 1)
+    return missing[:, left] | missing[:, right]
+
+
+def _ldaps_lag_delta(values: np.ndarray) -> np.ndarray:
+    delta = np.empty_like(values, dtype=np.float32)
+    delta[:, 1:] = values[:, 1:] - values[:, :-1]
+    delta[:, 0] = values[:, 1] - values[:, 0]
+    return delta
+
+
+def _ldaps_lag_missing(missing: np.ndarray) -> np.ndarray:
+    paired = np.empty_like(missing, dtype=bool)
+    paired[:, 1:] = missing[:, 1:] | missing[:, :-1]
+    paired[:, 0] = missing[:, 0] | missing[:, 1]
+    return paired
+
+
+def _ldaps_roll3(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    padded = np.pad(values, ((0, 0), (1, 1), (0, 0), (0, 0)), mode="edge")
+    windows = np.stack(
+        [padded[:, offset : offset + values.shape[1]] for offset in range(3)],
+        axis=0,
+    )
+    return windows.mean(axis=0).astype(np.float32), windows.std(axis=0).astype(np.float32)
+
+
+def _ldaps_broadcast_spatial(values: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    output = np.zeros((*values.shape, *mask.shape), dtype=np.float32)
+    output[..., mask] = values[..., None]
+    return output
+
+
+def _ldaps_spatial_values(values: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    return values[..., mask]
+
+
+def _ldaps_spatial_plane(
+    values: np.ndarray,
+    mask: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    rows, columns = np.where(mask)
+    design = np.column_stack(
+        [columns.astype(np.float32), rows.astype(np.float32), np.ones(len(rows))]
+    )
+    pseudo_inverse = np.linalg.pinv(design).astype(np.float32)
+    coefficients = np.einsum(
+        "itn,kn->itk",
+        _ldaps_spatial_values(values, mask),
+        pseudo_inverse,
+    )
+    return (
+        _ldaps_broadcast_spatial(coefficients[..., 0], mask),
+        _ldaps_broadcast_spatial(coefficients[..., 1], mask),
+    )
+
+
+def _ldaps_spatial_missing(missing: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    return _ldaps_broadcast_spatial(
+        _ldaps_spatial_values(missing, mask).any(axis=-1),
+        mask,
+    ).astype(bool)
+
+
+def build_ldaps_derived_family_tensor(
+    frame: pd.DataFrame,
+    family: str,
+    labels: pd.DataFrame | None = None,
+) -> SourceIssueTensor:
+    if family not in LDAPS_DERIVED_FAMILY_CHANNELS:
+        raise ValueError(f"Unknown LDAPS derived family: {family}")
+    required = ldaps_derived_family_required_columns(family)
+    missing_columns = [column for column in required if column not in frame.columns]
+    if missing_columns:
+        raise ValueError(f"LDAPS {family} missing columns: {missing_columns}")
+
+    extra_vectors = (
+        (LDAPS_5M_CORE_SPEC.vectors[-1],) if family == "vertical_profile" else ()
+    )
+    vector_raw = {
+        channel for vector in extra_vectors for channel in (vector.u, vector.v)
+    }
+    extra_scalars = tuple(
+        channel
+        for channel in LDAPS_DERIVED_RAW_CHANNELS[family]
+        if channel not in vector_raw
+    )
+    parent_spec = GridSourceSpec(
+        name=f"ldaps_{family}_derived_parent",
+        layout=LDAPS_CORE_SPEC.layout,
+        vectors=(*LDAPS_CORE_SPEC.vectors, *extra_vectors),
+        scalar_channels=extra_scalars,
+    )
+    parent = build_grid_source_core_tensor(frame, parent_spec, labels=labels)
+    channel_index = {
+        channel: index for index, channel in enumerate(parent.channel_names)
+    }
+
+    def value(channel: str) -> np.ndarray:
+        return parent.values[:, :, channel_index[channel]]
+
+    def missing(channel: str) -> np.ndarray:
+        return parent.missing_mask[:, :, channel_index[channel]]
+
+    def combined_missing(*channels: str) -> np.ndarray:
+        result = np.zeros_like(parent.values[:, :, 0], dtype=bool)
+        for channel in channels:
+            result |= missing(channel)
+        return result
+
+    umax_name = "heightAboveGround_50_50MUmax"
+    vmax_name = "heightAboveGround_50_50MVmax"
+    umin_name = "heightAboveGround_50_50MUmin"
+    vmin_name = "heightAboveGround_50_50MVmin"
+    u10_name = "heightAboveGround_10_10u"
+    v10_name = "heightAboveGround_10_10v"
+    envelope_inputs = (umax_name, vmax_name, umin_name, vmin_name)
+    umax, vmax = value(umax_name), value(vmax_name)
+    umin, vmin = value(umin_name), value(vmin_name)
+    u10, v10 = value(u10_name), value(v10_name)
+    ws10 = value("wind_10m_speed")
+    mid_u = 0.5 * (umax + umin)
+    mid_v = 0.5 * (vmax + vmin)
+    ws50mid = np.hypot(mid_u, mid_v).astype(np.float32)
+    envelope_u = umax - umin
+    envelope_v = vmax - vmin
+    envelope_norm = np.hypot(envelope_u, envelope_v).astype(np.float32)
+    envelope_missing = combined_missing(*envelope_inputs)
+    wind_missing = combined_missing(*envelope_inputs, u10_name, v10_name)
+    mask = parent.spatial_mask
+    derived: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+    def add(
+        name: str,
+        values: np.ndarray,
+        missing_values: np.ndarray,
+    ) -> None:
+        derived[name] = (
+            np.asarray(values, dtype=np.float32),
+            np.asarray(missing_values, dtype=bool),
+        )
+
+    if family == "envelope":
+        add("ldaps_50m_mid_u", mid_u, combined_missing(umax_name, umin_name))
+        add("ldaps_50m_mid_v", mid_v, combined_missing(vmax_name, vmin_name))
+        add("ldaps_50m_mid_speed", ws50mid, envelope_missing)
+        add("ldaps_50m_envelope_u", envelope_u, combined_missing(umax_name, umin_name))
+        add("ldaps_50m_envelope_v", envelope_v, combined_missing(vmax_name, vmin_name))
+        add("ldaps_50m_envelope_norm", envelope_norm, envelope_missing)
+        add(
+            "ldaps_50m_relative_envelope",
+            envelope_norm / np.maximum(ws50mid, 1.0),
+            envelope_missing,
+        )
+
+    elif family == "vertical_profile":
+        u5_name = "heightAboveGround_5_XBLWS"
+        v5_name = "heightAboveGround_5_YBLWS"
+        u5, v5 = value(u5_name), value(v5_name)
+        ws5 = value("wind_5m_speed")
+        five_missing = combined_missing(u5_name, v5_name)
+        all_vertical_missing = wind_missing | five_missing
+        add("ldaps_50m_mid_minus_10m_speed", ws50mid - ws10, wind_missing)
+        add(
+            "ldaps_50m_mid_10m_log_shear",
+            np.log(np.maximum(ws50mid, 0.5) / np.maximum(ws10, 0.5))
+            / np.log(5.0),
+            wind_missing,
+        )
+        add(
+            "ldaps_50m_mid_10m_alignment",
+            _ldaps_safe_alignment(mid_u, mid_v, u10, v10),
+            wind_missing,
+        )
+        add("ldaps_10m_minus_5m_speed", ws10 - ws5, all_vertical_missing)
+        add(
+            "ldaps_10m_5m_log_shear",
+            np.log(np.maximum(ws10, 0.5) / np.maximum(ws5, 0.5)) / np.log(2.0),
+            all_vertical_missing,
+        )
+        add(
+            "ldaps_10m_5m_alignment",
+            _ldaps_safe_alignment(u10, v10, u5, v5),
+            all_vertical_missing,
+        )
+
+    elif family == "density_power":
+        temperature_name = "heightAboveGround_2_t"
+        humidity_name = "heightAboveGround_2_q"
+        density_inputs = (temperature_name, humidity_name, LDAPS_SURFACE_PRESSURE_COLUMN)
+        temperature = np.maximum(value(temperature_name), 180.0)
+        specific_humidity = np.clip(value(humidity_name), 0.0, 0.1)
+        virtual_temperature = temperature * (1.0 + 0.61 * specific_humidity)
+        density = np.maximum(value(LDAPS_SURFACE_PRESSURE_COLUMN), 10000.0) / (
+            287.05 * virtual_temperature
+        )
+        density_factor = np.cbrt(np.maximum(density, 0.1) / 1.225)
+        density_missing = combined_missing(*density_inputs)
+        add("ldaps_virtual_temperature", virtual_temperature, density_missing)
+        add("ldaps_air_density", density, density_missing)
+        add(
+            "ldaps_density_equivalent_ws10",
+            ws10 * density_factor,
+            density_missing | missing("wind_10m_speed"),
+        )
+        add(
+            "ldaps_density_equivalent_ws50mid",
+            ws50mid * density_factor,
+            density_missing | envelope_missing,
+        )
+        add(
+            "ldaps_power_density_ws10",
+            0.5 * density * np.power(ws10, 3),
+            density_missing | missing("wind_10m_speed"),
+        )
+        add(
+            "ldaps_power_density_ws50mid",
+            0.5 * density * np.power(ws50mid, 3),
+            density_missing | envelope_missing,
+        )
+
+    elif family == "pbl_stability":
+        blh = np.maximum(value(LDAPS_BLH_COLUMN), LDAPS_BLH_FLOOR_M)
+        blh_missing = missing(LDAPS_BLH_COLUMN)
+        hub_over_blh = TURBINE_HUB_HEIGHT_M / blh
+        shear = np.log(np.maximum(ws50mid, 0.5) / np.maximum(ws10, 0.5)) / np.log(
+            5.0
+        )
+        add("ldaps_hub_over_blh_family", hub_over_blh, blh_missing)
+        add(
+            "ldaps_blh_tendency_3h_family",
+            _ldaps_centered_slope(blh, 3),
+            _ldaps_centered_missing(blh_missing, 3),
+        )
+        add(
+            "ldaps_envelope_x_hub_over_blh",
+            envelope_norm * hub_over_blh,
+            envelope_missing | blh_missing,
+        )
+        add(
+            "ldaps_shear_x_hub_over_blh",
+            shear * hub_over_blh,
+            wind_missing | blh_missing,
+        )
+        add(
+            "ldaps_ventilation_proxy",
+            blh * ws10,
+            blh_missing | missing("wind_10m_speed"),
+        )
+
+    elif family == "spatial_flow":
+        ws10_flat = _ldaps_spatial_values(ws10, mask)
+        mid_flat = _ldaps_spatial_values(ws50mid, mask)
+        mean_ws10 = ws10_flat.mean(axis=-1)
+        mean_mid = mid_flat.mean(axis=-1)
+        spatial_missing = _ldaps_spatial_missing(wind_missing, mask)
+        gradient_x, gradient_y = _ldaps_spatial_plane(ws10, mask)
+        mean_u10 = _ldaps_spatial_values(u10, mask).mean(axis=-1)
+        mean_v10 = _ldaps_spatial_values(v10, mask).mean(axis=-1)
+        add("ldaps_spatial_ws10_mean", _ldaps_broadcast_spatial(mean_ws10, mask), spatial_missing)
+        add("ldaps_spatial_ws10_std", _ldaps_broadcast_spatial(ws10_flat.std(axis=-1), mask), spatial_missing)
+        add(
+            "ldaps_spatial_ws10_p90_p10",
+            _ldaps_broadcast_spatial(
+                np.quantile(ws10_flat, 0.9, axis=-1)
+                - np.quantile(ws10_flat, 0.1, axis=-1),
+                mask,
+            ),
+            spatial_missing,
+        )
+        add(
+            "ldaps_spatial_ws10_coherence",
+            _ldaps_broadcast_spatial(
+                np.hypot(mean_u10, mean_v10) / np.maximum(mean_ws10, 0.1),
+                mask,
+            ),
+            spatial_missing,
+        )
+        add("ldaps_spatial_ws10_gradient_x", gradient_x, spatial_missing)
+        add("ldaps_spatial_ws10_gradient_y", gradient_y, spatial_missing)
+        add("ldaps_spatial_ws50mid_mean", _ldaps_broadcast_spatial(mean_mid, mask), spatial_missing)
+        add("ldaps_spatial_ws50mid_std", _ldaps_broadcast_spatial(mid_flat.std(axis=-1), mask), spatial_missing)
+        add(
+            "ldaps_spatial_ws50mid_p90_p10",
+            _ldaps_broadcast_spatial(
+                np.quantile(mid_flat, 0.9, axis=-1)
+                - np.quantile(mid_flat, 0.1, axis=-1),
+                mask,
+            ),
+            spatial_missing,
+        )
+
+    elif family == "terrain_interaction":
+        terrain_name = "surface_0_h"
+        terrain = value(terrain_name)
+        terrain_missing = missing(terrain_name)
+        terrain_summary_missing = _ldaps_spatial_missing(terrain_missing, mask)
+        terrain_mean = _ldaps_broadcast_spatial(
+            _ldaps_spatial_values(terrain, mask).mean(axis=-1), mask
+        )
+        slope_x, slope_y = _ldaps_spatial_plane(terrain, mask)
+        slope_magnitude = np.hypot(slope_x, slope_y).astype(np.float32)
+        alignment = np.where(
+            slope_magnitude > 1e-6,
+            (u10 * slope_x + v10 * slope_y)
+            / np.maximum(ws10 * slope_magnitude, 1e-6),
+            0.0,
+        )
+        alignment = np.clip(alignment, -1.0, 1.0)
+        terrain_wind_missing = terrain_summary_missing | combined_missing(u10_name, v10_name)
+        add("ldaps_terrain_relative_height", terrain - terrain_mean, terrain_missing | terrain_summary_missing)
+        add("ldaps_terrain_slope_x", slope_x, terrain_summary_missing)
+        add("ldaps_terrain_slope_y", slope_y, terrain_summary_missing)
+        add("ldaps_terrain_slope_magnitude", slope_magnitude, terrain_summary_missing)
+        add("ldaps_terrain_wind_alignment", alignment, terrain_wind_missing)
+        add(
+            "ldaps_terrain_wind_exposure",
+            ws10 * alignment * slope_magnitude,
+            terrain_wind_missing,
+        )
+
+    elif family == "temporal_trajectory":
+        previous_u10 = np.empty_like(u10)
+        previous_v10 = np.empty_like(v10)
+        previous_u10[:, 1:] = u10[:, :-1]
+        previous_v10[:, 1:] = v10[:, :-1]
+        previous_u10[:, 0] = u10[:, 1]
+        previous_v10[:, 0] = v10[:, 1]
+        temporal_missing = _ldaps_lag_missing(combined_missing(u10_name, v10_name))
+        ws10_roll_mean, ws10_roll_std = _ldaps_roll3(ws10)
+        ws50_roll_mean, _ = _ldaps_roll3(ws50mid)
+        add("ldaps_ws10_ramp_1h", _ldaps_lag_delta(ws10), temporal_missing)
+        add(
+            "ldaps_ws10_vector_ramp_1h",
+            np.hypot(u10 - previous_u10, v10 - previous_v10),
+            temporal_missing,
+        )
+        add(
+            "ldaps_ws10_direction_turn_1h",
+            1.0 - _ldaps_safe_alignment(u10, v10, previous_u10, previous_v10),
+            temporal_missing,
+        )
+        add("ldaps_ws50mid_ramp_1h", _ldaps_lag_delta(ws50mid), _ldaps_lag_missing(envelope_missing))
+        add("ldaps_envelope_ramp_1h", _ldaps_lag_delta(envelope_norm), _ldaps_lag_missing(envelope_missing))
+        add("ldaps_ws10_roll3_mean", ws10_roll_mean, missing("wind_10m_speed"))
+        add("ldaps_ws10_roll3_std", ws10_roll_std, missing("wind_10m_speed"))
+        add("ldaps_ws50mid_roll3_mean", ws50_roll_mean, envelope_missing)
+        issue_range = ws10.max(axis=1) - ws10.min(axis=1)
+        issue_range = np.broadcast_to(issue_range[:, None], ws10.shape)
+        issue_missing = np.broadcast_to(
+            combined_missing(u10_name, v10_name).any(axis=1)[:, None], ws10.shape
+        )
+        peak_index = ws10.argmax(axis=1).astype(np.float32)
+        current_index = np.arange(ws10.shape[1], dtype=np.float32)[None, :, None, None]
+        hours_to_peak = peak_index[:, None] - current_index
+        add("ldaps_ws10_issue_range", issue_range, issue_missing)
+        add("ldaps_ws10_hours_to_peak", hours_to_peak, issue_missing)
+
+    elif family == "thermodynamic_regime":
+        temperature_name = "heightAboveGround_2_t"
+        dewpoint_name = "heightAboveGround_2_dpt"
+        rh_name = "heightAboveGround_2_r"
+        q_name = "heightAboveGround_2_q"
+        temperature = value(temperature_name)
+        dewpoint = value(dewpoint_name)
+        rh = value(rh_name)
+        pressure = value(LDAPS_SURFACE_PRESSURE_COLUMN)
+        mslp = value(LDAPS_MSLP_COLUMN)
+        pressure_mean = _ldaps_broadcast_spatial(
+            _ldaps_spatial_values(pressure, mask).mean(axis=-1), mask
+        )
+        q = value(q_name)
+        q_mean = _ldaps_broadcast_spatial(
+            _ldaps_spatial_values(q, mask).mean(axis=-1), mask
+        )
+        pressure_gradient_x, pressure_gradient_y = _ldaps_spatial_plane(pressure, mask)
+        temperature_gradient_x, temperature_gradient_y = _ldaps_spatial_plane(
+            temperature, mask
+        )
+        thermo_missing = combined_missing(
+            temperature_name,
+            dewpoint_name,
+            rh_name,
+            q_name,
+            LDAPS_SURFACE_PRESSURE_COLUMN,
+            LDAPS_MSLP_COLUMN,
+        )
+        spatial_thermo_missing = _ldaps_spatial_missing(thermo_missing, mask)
+        add("ldaps_dewpoint_depression", temperature - dewpoint, thermo_missing)
+        add("ldaps_relative_humidity_deficit", 100.0 - np.clip(rh, 0.0, 100.0), thermo_missing)
+        add("ldaps_mslp_surface_gap", mslp - pressure, thermo_missing)
+        add("ldaps_surface_pressure_anomaly", pressure - pressure_mean, thermo_missing | spatial_thermo_missing)
+        add("ldaps_surface_pressure_gradient_x", pressure_gradient_x, spatial_thermo_missing)
+        add("ldaps_surface_pressure_gradient_y", pressure_gradient_y, spatial_thermo_missing)
+        add(
+            "ldaps_temperature_gradient_magnitude",
+            np.hypot(temperature_gradient_x, temperature_gradient_y),
+            spatial_thermo_missing,
+        )
+        add("ldaps_specific_humidity_anomaly", q - q_mean, thermo_missing | spatial_thermo_missing)
+
+    elif family == "weather_regime":
+        direct_name = "heightAboveGround_2_SWDIR"
+        diffuse_name = "heightAboveGround_2_SWDIF"
+        ndnsw_name = "surface_0_NDNSW"
+        ndnlw_name = "surface_0_NDNLW"
+        cloud_names = ("etc_0_hcc", "etc_0_mcc", "etc_0_lcc", "etc_0_VLCDC")
+        precip_names = ("surface_0_avg_lsprate", "surface_0_lssrate", "surface_0_ncpcp")
+        snow_names = ("surface_0_snol", "surface_0_SNOM")
+        direct, diffuse = value(direct_name), value(diffuse_name)
+        shortwave = direct + diffuse
+        clouds = [np.maximum(value(channel), 0.0) for channel in cloud_names]
+        cloud_sum = np.sum(clouds, axis=0)
+        low_cloud = clouds[2] + clouds[3]
+        precip_positive = [np.maximum(value(channel), 0.0) for channel in precip_names]
+        snow_positive = [np.maximum(value(channel), 0.0) for channel in snow_names]
+        precip_activity = np.sum(precip_positive, axis=0)
+        snow_activity = np.sum(snow_positive, axis=0)
+        shortwave_missing = combined_missing(direct_name, diffuse_name)
+        radiation_missing = combined_missing(ndnsw_name, ndnlw_name)
+        cloud_missing = combined_missing(*cloud_names)
+        precip_missing = combined_missing(*precip_names)
+        snow_missing = combined_missing(*snow_names)
+        add("ldaps_shortwave_total", shortwave, shortwave_missing)
+        add(
+            "ldaps_shortwave_direct_fraction",
+            np.where(shortwave > 1.0, direct / np.maximum(shortwave, 1.0), 0.0),
+            shortwave_missing,
+        )
+        add("ldaps_net_radiation_proxy", value(ndnsw_name) + value(ndnlw_name), radiation_missing)
+        add("ldaps_cloud_layer_mean", cloud_sum / float(len(cloud_names)), cloud_missing)
+        add("ldaps_low_cloud_dominance", low_cloud / np.maximum(cloud_sum, 1e-6), cloud_missing)
+        add("ldaps_precip_log_activity", np.log1p(precip_activity), precip_missing)
+        add("ldaps_precip_occurrence", (precip_activity > 0.0).astype(np.float32), precip_missing)
+        add("ldaps_snow_log_activity", np.log1p(snow_activity), snow_missing)
+        add("ldaps_snow_occurrence", (snow_activity > 0.0).astype(np.float32), snow_missing)
+
+    expected_channels = LDAPS_DERIVED_FAMILY_CHANNELS[family]
+    if tuple(derived) != expected_channels:
+        raise RuntimeError(
+            f"LDAPS {family} derived channels differ: {tuple(derived)}"
+        )
+    value_channels = [
+        parent.values[:, :, channel_index[channel]]
+        for channel in LDAPS_CORE_SPEC.output_channels
+    ]
+    missing_channels = [
+        parent.missing_mask[:, :, channel_index[channel]]
+        for channel in LDAPS_CORE_SPEC.output_channels
+    ]
+    value_channels.extend(derived[channel][0] for channel in expected_channels)
+    missing_channels.extend(derived[channel][1] for channel in expected_channels)
+    values = np.stack(value_channels, axis=2).astype(np.float32)
+    values *= mask.reshape(1, 1, 1, *mask.shape)
+    tensor = replace(
+        parent,
+        source=f"ldaps_{family}_derived_core",
+        values=values,
+        missing_mask=np.stack(missing_channels, axis=2),
+        channel_names=(*LDAPS_CORE_SPEC.output_channels, *expected_channels),
     )
     tensor.validate()
     return tensor

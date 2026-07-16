@@ -19,7 +19,9 @@ from utils.source_expert_dataset import (
     GFS_VERTICAL_WIND_EXTRA_SCALARS,
     GFS_VERTICAL_WIND_EXTRA_VECTORS,
     GFS_VERTICAL_WIND_SPEC,
+    GridSourceSpec,
     LDAPS_CORE_SPEC,
+    LDAPS_DERIVED_FAMILY_CHANNELS,
     LDAPS_5M_CORE_SPEC,
     LDAPS_BLH_COLUMN,
     LDAPS_BLH_FLOOR_M,
@@ -44,8 +46,10 @@ from utils.source_expert_dataset import (
     build_gefs_upper_spread_core_tensor,
     build_grid_source_core_tensor,
     build_ldaps_blh_ratio_tensor,
+    build_ldaps_derived_family_tensor,
     build_ldaps_pressure_tendency_tensor,
     fit_source_channel_scaler,
+    ldaps_derived_family_required_columns,
     select_gefs_issues,
     transform_source_channels,
 )
@@ -155,6 +159,52 @@ def make_gefs_frames(run_count=2):
                         }
                     )
     return pd.DataFrame(pressure_rows), pd.DataFrame(gust_rows)
+
+
+def make_ldaps_derived_frame(family):
+    required = ldaps_derived_family_required_columns(family)
+    raw_channels = tuple(
+        channel
+        for channel in required
+        if channel not in {"forecast_kst_dtm", "data_available_kst_dtm", "grid_id"}
+    )
+    spec = GridSourceSpec(
+        name=f"ldaps_{family}_test_input",
+        layout=LDAPS_CORE_SPEC.layout,
+        vectors=(),
+        scalar_channels=raw_channels,
+    )
+    frame = make_grid_frame(spec)
+    replacements = {
+        "heightAboveGround_5_XBLWS": 2.0,
+        "heightAboveGround_5_YBLWS": 1.0,
+        "heightAboveGround_2_t": 280.0,
+        "heightAboveGround_2_dpt": 275.0,
+        "heightAboveGround_2_r": 70.0,
+        "heightAboveGround_2_q": 0.005,
+        "surface_0_sp": 90000.0,
+        "meanSea_0_prmsl": 101000.0,
+        "etc_0_blh": 300.0,
+        "surface_0_NDNSW": 100.0,
+        "surface_0_NDNLW": -30.0,
+        "heightAboveGround_2_SWDIR": 200.0,
+        "heightAboveGround_2_SWDIF": 50.0,
+        "etc_0_hcc": 20.0,
+        "etc_0_mcc": 30.0,
+        "etc_0_lcc": 40.0,
+        "etc_0_VLCDC": 10.0,
+        "surface_0_avg_lsprate": 0.1,
+        "surface_0_lssrate": 0.2,
+        "surface_0_ncpcp": 0.3,
+        "surface_0_snol": 0.1,
+        "surface_0_SNOM": 0.2,
+    }
+    for channel, replacement in replacements.items():
+        if channel in frame.columns:
+            frame[channel] = replacement
+    if "surface_0_h" in frame.columns:
+        frame["surface_0_h"] = 850.0 + 5.0 * frame["grid_id"]
+    return frame
 
 
 class SourceExpertDatasetTest(unittest.TestCase):
@@ -290,6 +340,41 @@ class SourceExpertDatasetTest(unittest.TestCase):
             set(LDAPS_SURFACE_REGIME_CHANNELS),
         )
         self.assertNotIn("surface_0_lsm", surface.channel_names)
+
+    def test_ldaps_derived_families_append_only_declared_channels(self):
+        for family, expected_channels in LDAPS_DERIVED_FAMILY_CHANNELS.items():
+            with self.subTest(family=family):
+                tensor = build_ldaps_derived_family_tensor(
+                    make_ldaps_derived_frame(family),
+                    family,
+                )
+                self.assertEqual(
+                    tensor.values.shape,
+                    (2, 24, 9 + len(expected_channels), 4, 5),
+                )
+                self.assertEqual(
+                    tensor.channel_names,
+                    (*LDAPS_CORE_SPEC.output_channels, *expected_channels),
+                )
+                self.assertEqual(tensor.source, f"ldaps_{family}_derived_core")
+                self.assertTrue(np.isfinite(tensor.values).all())
+                self.assertTrue(np.all(tensor.values[..., ~tensor.spatial_mask] == 0.0))
+                raw_extras = set(ldaps_derived_family_required_columns(family)) - set(
+                    LDAPS_CORE_SPEC.raw_channels
+                ) - {"forecast_kst_dtm", "data_available_kst_dtm", "grid_id"}
+                self.assertTrue(raw_extras.isdisjoint(tensor.channel_names))
+
+    def test_ldaps_envelope_uses_component_width_not_speed_subtraction(self):
+        tensor = build_ldaps_derived_family_tensor(
+            make_ldaps_derived_frame("envelope"),
+            "envelope",
+        )
+        norm_index = tensor.channel_names.index("ldaps_50m_envelope_norm")
+        relative_index = tensor.channel_names.index("ldaps_50m_relative_envelope")
+        envelope_norm = tensor.values[:, :, norm_index][:, :, tensor.spatial_mask]
+        relative = tensor.values[:, :, relative_index][:, :, tensor.spatial_mask]
+        self.assertTrue(np.all(envelope_norm >= 0.0))
+        self.assertTrue(np.isfinite(relative).all())
 
     def test_gfs_core_has_only_approved_channels(self):
         tensor = build_grid_source_core_tensor(make_grid_frame(GFS_CORE_SPEC), GFS_CORE_SPEC)
