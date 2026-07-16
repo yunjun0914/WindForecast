@@ -873,6 +873,57 @@ OOF:   ldaps_pressure_tendency_core_oof_predictions.csv
 Blend: results/source_experts_v1/ldaps_pressure_tendency_gfs10_blend_524c5bb/
 ```
 
+### Phase 10 LDAPS mean sea-level pressure P1 ablation
+
+2026-07-16, code commit `eaaa6cb`. surface pressure의 지형·고도 정적 성분을 제거하면서 절대적인 고·저기압 regime을 보존하는 raw `meanSea_0_prmsl` 한 채널만 추가했다.
+
+사전 audit:
+
+```text
+rows/missing/non-finite = 420,864 / 0 / 0
+p01/p50/p99             = 99,759 / 101,514 / 102,972 Pa
+spatial range p50/p99   = 33.6 / 147.6 Pa
+corr(surface pressure)  = 0.637
+```
+
+raw surface pressure, tendency, anomaly와 gradient는 포함하지 않았다. LDAPS core 9채널을 유지하고 MSLP 한 채널만 추가해 동일 seed42/pure6/h64 TCN strict outer-year OOF를 bear에서 실행했다.
+
+Standalone:
+
+| Variant | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| LDAPS core | 0.622694 | 0.145303 | 0.390690 | - |
+| LDAPS core + MSLP | 0.622073 | 0.146975 | 0.391120 | -0.000621 |
+
+Final source ensemble comparison은 채택된 GFS 10m baseline 위에서 수행했다.
+
+```text
+baseline = LDAPS core + GFS 10m core + GEFS mean core
+variant  = LDAPS MSLP core + GFS 10m core + GEFS mean core
+```
+
+| Ensemble | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| GFS 10m accepted baseline | 0.630926 | 0.137525 | 0.399378 | - |
+| LDAPS MSLP replacement | 0.629152 | 0.138414 | 0.396719 | -0.001774 |
+
+- held-out delta 2022/2023/2024 `+0.000156/-0.001944/-0.002289`
+- group delta g1/g2/g3 `-0.002963/+0.001360/-0.003719`
+- standalone FiCR은 소폭 올랐지만 NMAE가 악화됐고, final ensemble에서는 두 metric 모두 악화
+- surface pressure, 3h tendency, MSLP가 모두 final source blend를 낮췄으므로 pressure scalar 직접입력 계열은 종료
+- pressure를 T/q와 결합한 air density처럼 닫힌 물리량은 별도 후보이며 이번 결론에 포함하지 않음
+- baseline은 `0.630926` 유지; OOF와 blend 모두 69,747행, duplicate 0, non-finite 0
+- test prediction과 submission 없음
+
+산출물:
+
+```text
+Bear:  /home/yunjun0914/windforecast_runs/source_experts_v1/ldaps_mslp_p1_v1_eaaa6cb/
+Local: results/source_experts_v1/ldaps_mslp_p1_v1_eaaa6cb/
+OOF:   ldaps_mslp_core_oof_predictions.csv
+Blend: results/source_experts_v1/ldaps_mslp_gfs10_blend_eaaa6cb/
+```
+
 ## 13. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.

@@ -3101,6 +3101,14 @@ nonzero differences > 1e-9 = 0
 - NMAE와 FiCR 모두 악화되어 tendency 직접입력 기각. baseline `0.630926` 유지, test/submission 없음.
 - OOF: ignored `results/source_experts_v1/ldaps_pressure_tendency_p1_v1_524c5bb/ldaps_pressure_tendency_core_oof_predictions.csv`.
 
+### 2026-07-16 - LDAPS mean sea-level pressure P1 ablation
+
+- commit `eaaa6cb`, LDAPS core에 raw `meanSea_0_prmsl` 한 채널만 추가. 결측 0, p01/p50/p99 `99,759/101,514/102,972 Pa`, spatial range 중앙값 `33.6 Pa`; surface pressure/tendency/gradient 없음.
+- 동일 seed42/pure6/h64 strict outer-year OOF standalone `0.622694 -> 0.622073` (`-0.000621`).
+- 채택된 GFS 10m baseline 위 source blend `0.630926 -> 0.629152` (`-0.001774`); group delta `-0.002963/+0.001360/-0.003719`.
+- pressure scalar 직접입력 계열은 종료. air density 같은 T/q 결합 물리량은 별도 후보이며 baseline `0.630926` 유지. test/submission 없음.
+- OOF: ignored `results/source_experts_v1/ldaps_mslp_p1_v1_eaaa6cb/ldaps_mslp_core_oof_predictions.csv`.
+
 ### 2026-07-16 - GEFS ensemble spread TREE OOF v1
 
 - 외부데이터 1호: GEFS 앙상블 mean/spread(u/v 10m·925·850·700hPa + gust)를 AWS `noaa-gefs-pds`에서 D-2 18Z cycle만 수집. run 2021-12-29~2025-12-30 49개월 결측 0, 파일별 S3 Last-Modified(공개시각) 소명 메타 저장. 수집기 `data/external/collect_gefs_ensemble.py`, 시간당 피처 `data/external/build_gefs_features.py`.
