@@ -14,6 +14,10 @@ EXPECTED_LEADS = np.arange(12, 36, dtype=np.int16)
 GEFS_FHOURS = np.arange(21, 49, 3, dtype=np.int16)
 FARM_LATITUDE = 37.2819
 FARM_LONGITUDE = 128.96237
+TURBINE_HUB_HEIGHT_M = 117.0
+LDAPS_BLH_FLOOR_M = 20.0
+LDAPS_BLH_COLUMN = "etc_0_blh"
+LDAPS_HUB_OVER_BLH_CHANNEL = "ldaps_hub_over_blh"
 
 
 @dataclass(frozen=True)
@@ -94,6 +98,14 @@ LDAPS_5M_CORE_SPEC = GridSourceSpec(
             "heightAboveGround_5_YBLWS",
         ),
     ),
+)
+
+
+LDAPS_BLH_RATIO_SPEC = GridSourceSpec(
+    name="ldaps_blh_ratio_core",
+    layout=LDAPS_CORE_SPEC.layout,
+    vectors=LDAPS_CORE_SPEC.vectors,
+    scalar_channels=(LDAPS_HUB_OVER_BLH_CHANNEL,),
 )
 
 
@@ -233,6 +245,10 @@ class SourceChannelScaler:
 
 def source_required_columns(spec: GridSourceSpec) -> tuple[str, ...]:
     return (*TIME_KEY_COLS, "grid_id", *spec.raw_channels)
+
+
+def ldaps_blh_ratio_required_columns() -> tuple[str, ...]:
+    return (*source_required_columns(LDAPS_CORE_SPEC), LDAPS_BLH_COLUMN)
 
 
 def _time_features(forecast_times: np.ndarray, issue_times: np.ndarray) -> np.ndarray:
@@ -415,6 +431,24 @@ def build_grid_source_core_tensor(
     )
     tensor.validate()
     return tensor
+
+
+def build_ldaps_blh_ratio_tensor(
+    frame: pd.DataFrame,
+    labels: pd.DataFrame | None = None,
+) -> SourceIssueTensor:
+    required = ldaps_blh_ratio_required_columns()
+    missing_columns = [column for column in required if column not in frame.columns]
+    if missing_columns:
+        raise ValueError(f"{LDAPS_BLH_RATIO_SPEC.name} missing columns: {missing_columns}")
+
+    work = frame[list(required)].copy()
+    blh = pd.to_numeric(work.pop(LDAPS_BLH_COLUMN), errors="coerce")
+    work[LDAPS_HUB_OVER_BLH_CHANNEL] = TURBINE_HUB_HEIGHT_M / np.maximum(
+        blh,
+        LDAPS_BLH_FLOOR_M,
+    )
+    return build_grid_source_core_tensor(work, LDAPS_BLH_RATIO_SPEC, labels=labels)
 
 
 def _nearest_axis(values: Iterable[float], target: float, count: int) -> np.ndarray:

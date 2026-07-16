@@ -13,11 +13,17 @@ from utils.source_expert_dataset import (
     GFS_SURFACE_PRESSURE_SPEC,
     LDAPS_CORE_SPEC,
     LDAPS_5M_CORE_SPEC,
+    LDAPS_BLH_COLUMN,
+    LDAPS_BLH_FLOOR_M,
+    LDAPS_BLH_RATIO_SPEC,
+    LDAPS_HUB_OVER_BLH_CHANNEL,
     LDAPS_SURFACE_PRESSURE_SPEC,
+    TURBINE_HUB_HEIGHT_M,
     apply_gefs_publication_fallback,
     build_gefs_mean_core_tensor,
     build_gefs_spread_core_tensor,
     build_grid_source_core_tensor,
+    build_ldaps_blh_ratio_tensor,
     fit_source_channel_scaler,
     select_gefs_issues,
     transform_source_channels,
@@ -175,6 +181,35 @@ class SourceExpertDatasetTest(unittest.TestCase):
                 "heightAboveGround_5_YBLWS",
                 "wind_5m_speed",
             },
+        )
+
+    def test_ldaps_blh_ratio_adds_only_the_clipped_hub_height_ratio(self):
+        frame = make_grid_frame(LDAPS_CORE_SPEC)
+        frame[LDAPS_BLH_COLUMN] = 117.0
+        frame.loc[0, LDAPS_BLH_COLUMN] = 58.5
+        frame.loc[1, LDAPS_BLH_COLUMN] = 10.0
+
+        tensor = build_ldaps_blh_ratio_tensor(frame)
+
+        self.assertEqual(tensor.values.shape, (2, 24, 10, 4, 5))
+        self.assertEqual(tensor.channel_names, LDAPS_BLH_RATIO_SPEC.output_channels)
+        self.assertNotIn(LDAPS_BLH_COLUMN, tensor.channel_names)
+        self.assertEqual(
+            set(tensor.channel_names) - set(LDAPS_CORE_SPEC.output_channels),
+            {LDAPS_HUB_OVER_BLH_CHANNEL},
+        )
+        channel_index = tensor.channel_names.index(LDAPS_HUB_OVER_BLH_CHANNEL)
+        first_row, first_column = LDAPS_CORE_SPEC.layout[1]
+        second_row, second_column = LDAPS_CORE_SPEC.layout[2]
+        self.assertAlmostEqual(
+            float(tensor.values[0, 0, channel_index, first_row, first_column]),
+            TURBINE_HUB_HEIGHT_M / 58.5,
+            places=6,
+        )
+        self.assertAlmostEqual(
+            float(tensor.values[0, 0, channel_index, second_row, second_column]),
+            TURBINE_HUB_HEIGHT_M / LDAPS_BLH_FLOOR_M,
+            places=6,
         )
 
     def test_gfs_core_has_only_approved_channels(self):

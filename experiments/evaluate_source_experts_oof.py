@@ -39,9 +39,11 @@ from utils.source_expert_dataset import (
     build_gefs_mean_core_tensor,
     build_gefs_spread_core_tensor,
     build_grid_source_core_tensor,
+    build_ldaps_blh_ratio_tensor,
     fit_source_channel_scaler,
     gefs_publication_audit,
     load_gefs_core_frames,
+    ldaps_blh_ratio_required_columns,
     select_gefs_issues,
     source_required_columns,
     transform_source_channels,
@@ -55,6 +57,7 @@ SOURCE_NAMES = (
     "gefs_spread_core",
     "gfs_10m_core",
     "ldaps_5m_core",
+    "ldaps_blh_ratio_core",
     "ldaps_core_sp",
     "gfs_core_sp",
 )
@@ -65,6 +68,7 @@ PREDICTION_FILES = {
     "gefs_spread_core": "gefs_spread_core_oof_predictions.csv",
     "gfs_10m_core": "gfs_10m_core_oof_predictions.csv",
     "ldaps_5m_core": "ldaps_5m_core_oof_predictions.csv",
+    "ldaps_blh_ratio_core": "ldaps_blh_ratio_core_oof_predictions.csv",
     "ldaps_core_sp": "ldaps_core_sp_oof_predictions.csv",
     "gfs_core_sp": "gfs_core_sp_oof_predictions.csv",
 }
@@ -202,6 +206,15 @@ def load_source_bundle(
                 source_required_columns(LDAPS_5M_CORE_SPEC),
             ),
             LDAPS_5M_CORE_SPEC,
+            labels=labels,
+        )
+        bundle = SourceBundle(source, (tensor,))
+    elif source == "ldaps_blh_ratio_core":
+        tensor = build_ldaps_blh_ratio_tensor(
+            read_source_csv(
+                args.ldaps_train,
+                ldaps_blh_ratio_required_columns(),
+            ),
             labels=labels,
         )
         bundle = SourceBundle(source, (tensor,))
