@@ -626,6 +626,45 @@ Duck expert OOF: /home/yunjun0914/windforecast_runs/source_experts_v1/pressure_s
 Local blend:     results/source_experts_v1/pressure_sp_v1/
 ```
 
+### Phase 5 GEFS raw spread S1 ablation
+
+2026-07-16, code commit `29f50c9`. GEFS mean-core의 설정은 고정하고 아래 ensemble spread 원시 채널 7개만 추가했다.
+
+```text
+pressure 7x7: u10m_sprd, v10m_sprd, u925_sprd, v925_sprd, u850_sprd, v850_sprd
+gust 9x9:     gust_sprd
+```
+
+추가 파생은 없다. component spread norm, relative spread, confidence gating, 700hPa, blend weight 변경은 실행하지 않았다. `geavg`와 `gespr` 중 하나라도 publication-safe가 아니면 mean과 spread 전체를 직전 joint-safe issue로 함께 fallback했다.
+
+| Variant | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| GEFS mean core | 0.610921 | 0.152362 | 0.374204 | - |
+| GEFS mean + raw spread | 0.608686 | 0.158196 | 0.375568 | -0.002235 |
+
+Group Score delta:
+
+```text
+g1 = +0.000819
+g2 = -0.004238
+g3 = -0.003286
+```
+
+- seed42, pure 6%, h64 3-block full-context TCN, outer-year hard Score checkpoint 등 core와 동일
+- pressure tensor `9 -> 15` channels, gust tensor `1 -> 2` channels
+- 전체 FiCR은 `+0.001364`였지만 NMAE가 `+0.005834` 악화
+- standalone 유지 기준을 충족하지 못해 raw spread S1 variant는 기각
+- S2 spread norm/relative spread와 source blend 교체는 사용자 승인 전 자동 실행하지 않음
+- test prediction과 submission 없음
+
+산출물:
+
+```text
+Duck: /home/yunjun0914/windforecast_runs/source_experts_v1/gefs_spread_s1_v1_29f50c9/
+Local: results/source_experts_v1/gefs_spread_s1_v1_29f50c9/
+OOF:   gefs_spread_core_oof_predictions.csv
+```
+
 ## 13. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.

@@ -3059,3 +3059,10 @@ nonzero differences > 1e-9 = 0
 - standalone: LDAPS `0.622694→0.621934` (`-0.000760`), GFS `0.610861→0.611738` (`+0.000877`).
 - LDAPS-SP/GFS-SP/GEFS meta-year convex blend는 `0.630304` (NMAE `0.139408`, FiCR `0.400015`)로 core blend `0.630831` 대비 `-0.000527`. 2022/2023은 개선했지만 2024 `-0.003509`.
 - g2는 `+0.002449`이나 g1/g3는 `-0.001789/-0.002243`; pressure가 g2 FiCR를 올리는 대신 NMAE를 악화. 기각, test/submission 없음. 결과는 ignored `results/source_experts_v1/pressure_sp_v1/`.
+
+### 2026-07-16 - GEFS raw spread S1 ablation
+
+- commit `29f50c9`, GEFS mean-core에 10/925/850hPa `u/v spread` 6개와 `gust spread` 1개만 추가. norm/relative/confidence/700hPa/blend 없음.
+- 동일 seed42/pure6/h64 TCN outer-year OOF에서 `0.610921 -> 0.608686` (`-0.002235`). NMAE `+0.005834` 악화, FiCR `+0.001364` 개선.
+- group delta g1/g2/g3 `+0.000819/-0.004238/-0.003286`. standalone 기각, S2와 source blend는 자동 실행하지 않음. test/submission 없음.
+- OOF: ignored `results/source_experts_v1/gefs_spread_s1_v1_29f50c9/gefs_spread_core_oof_predictions.csv`.
