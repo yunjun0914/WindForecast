@@ -12,6 +12,7 @@ from utils.source_expert_dataset import (
     GFS_10M_CORE_SPEC,
     GFS_SURFACE_PRESSURE_SPEC,
     LDAPS_CORE_SPEC,
+    LDAPS_5M_CORE_SPEC,
     LDAPS_SURFACE_PRESSURE_SPEC,
     apply_gefs_publication_fallback,
     build_gefs_mean_core_tensor,
@@ -153,6 +154,27 @@ class SourceExpertDatasetTest(unittest.TestCase):
             float(tensor.values[0, lead_index, channel_index, row, column]),
             20.01,
             places=5,
+        )
+
+    def test_ldaps_5m_core_adds_only_one_vector_and_speed(self):
+        core = build_grid_source_core_tensor(
+            make_grid_frame(LDAPS_CORE_SPEC),
+            LDAPS_CORE_SPEC,
+        )
+        five_meter = build_grid_source_core_tensor(
+            make_grid_frame(LDAPS_5M_CORE_SPEC),
+            LDAPS_5M_CORE_SPEC,
+        )
+
+        self.assertEqual(five_meter.values.shape, (2, 24, 12, 4, 5))
+        self.assertEqual(int(five_meter.spatial_mask.sum()), 16)
+        self.assertEqual(
+            set(five_meter.channel_names) - set(core.channel_names),
+            {
+                "heightAboveGround_5_XBLWS",
+                "heightAboveGround_5_YBLWS",
+                "wind_5m_speed",
+            },
         )
 
     def test_gfs_core_has_only_approved_channels(self):

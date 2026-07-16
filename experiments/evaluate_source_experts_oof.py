@@ -31,6 +31,7 @@ from utils.source_expert_dataset import (
     GFS_10M_CORE_SPEC,
     GFS_SURFACE_PRESSURE_SPEC,
     LDAPS_CORE_SPEC,
+    LDAPS_5M_CORE_SPEC,
     LDAPS_SURFACE_PRESSURE_SPEC,
     GEFSIssueTensor,
     SourceIssueTensor,
@@ -53,6 +54,7 @@ SOURCE_NAMES = (
     *CORE_SOURCE_NAMES,
     "gefs_spread_core",
     "gfs_10m_core",
+    "ldaps_5m_core",
     "ldaps_core_sp",
     "gfs_core_sp",
 )
@@ -62,6 +64,7 @@ PREDICTION_FILES = {
     "gefs_mean_core": "gefs_mean_core_oof_predictions.csv",
     "gefs_spread_core": "gefs_spread_core_oof_predictions.csv",
     "gfs_10m_core": "gfs_10m_core_oof_predictions.csv",
+    "ldaps_5m_core": "ldaps_5m_core_oof_predictions.csv",
     "ldaps_core_sp": "ldaps_core_sp_oof_predictions.csv",
     "gfs_core_sp": "gfs_core_sp_oof_predictions.csv",
 }
@@ -189,6 +192,16 @@ def load_source_bundle(
                 args.ldaps_train, source_required_columns(LDAPS_CORE_SPEC)
             ),
             LDAPS_CORE_SPEC,
+            labels=labels,
+        )
+        bundle = SourceBundle(source, (tensor,))
+    elif source == "ldaps_5m_core":
+        tensor = build_grid_source_core_tensor(
+            read_source_csv(
+                args.ldaps_train,
+                source_required_columns(LDAPS_5M_CORE_SPEC),
+            ),
+            LDAPS_5M_CORE_SPEC,
             labels=labels,
         )
         bundle = SourceBundle(source, (tensor,))

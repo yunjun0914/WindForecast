@@ -83,6 +83,20 @@ LDAPS_CORE_SPEC = GridSourceSpec(
 )
 
 
+LDAPS_5M_CORE_SPEC = GridSourceSpec(
+    name="ldaps_5m_core",
+    layout=LDAPS_CORE_SPEC.layout,
+    vectors=(
+        *LDAPS_CORE_SPEC.vectors,
+        VectorChannels(
+            "wind_5m",
+            "heightAboveGround_5_XBLWS",
+            "heightAboveGround_5_YBLWS",
+        ),
+    ),
+)
+
+
 LDAPS_SURFACE_PRESSURE_SPEC = GridSourceSpec(
     name="ldaps_core_sp",
     layout=LDAPS_CORE_SPEC.layout,
