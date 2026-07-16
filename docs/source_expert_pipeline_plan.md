@@ -990,6 +990,90 @@ Blend 1: results/source_experts_v1/ldaps_thermo_pbl_gfs10_blend_2c5478b/
 Blend 2: results/source_experts_v1/ldaps_surface_regime_gfs10_blend_2c5478b/
 ```
 
+### Phase 12-A GFS remaining raw family ablation
+
+2026-07-16, code commit `f0f7b3d`. 채택된 GFS 10m core 10채널을 공통 부모로 두고 남은 raw 28개를 세 family로 나눴다. family끼리 합치거나 하위 subset을 탐색하지 않았다.
+
+```text
+Vertical-wind    +13ch: PBL/850/700/500hPa u/v/speed + PBL VRATE  (10 -> 23)
+Thermo/synoptic  +11ch: 2m T/Td/RH/q, sp/MSLP, 850/700/500 T/RH/gh (10 -> 21)
+Surface-regime    +8ch: radiation 2 + precipitation 2 + cloud 4     (10 -> 18)
+```
+
+28개 raw 모두 결측·비유한값·상수 채널이 없었다. 동일 seed42/pure6/h64 TCN strict outer-year OOF를 bear에서 한 세션으로 실행했다.
+
+Standalone:
+
+| Variant | Score | NMAE | FiCR | Delta vs GFS10 |
+|---|---:|---:|---:|---:|
+| GFS 10m core | 0.612026 | 0.149284 | 0.373336 | - |
+| GFS Vertical-wind | 0.613392 | 0.145799 | 0.372583 | +0.001366 |
+| GFS Thermo/synoptic | 0.618382 | 0.148560 | 0.385324 | +0.006356 |
+| GFS Surface-regime | 0.609827 | 0.150956 | 0.370610 | -0.002199 |
+
+각 family는 LDAPS core와 GEFS mean을 고정한 동일 source blend에서 독립 평가했다.
+
+| GFS replacement | Score | NMAE | FiCR | Delta vs accepted baseline |
+|---|---:|---:|---:|---:|
+| GFS 10m baseline | 0.630926 | 0.137525 | 0.399378 | - |
+| Vertical-wind | 0.633095 | 0.135638 | 0.401827 | +0.002169 |
+| Thermo/synoptic | 0.633318 | 0.137158 | 0.403795 | +0.002392 |
+| Surface-regime | 0.630325 | 0.137964 | 0.398614 | -0.000601 |
+
+Vertical-wind:
+
+- held-out delta 2022/2023/2024 `+0.003735/-0.002270/+0.005761`
+- group delta g1/g2/g3 `-0.000356/+0.004052/+0.002809`
+- standalone과 final blend가 승격 기준을 통과해 사용자 결정으로 별도 GFS expert 채택
+
+Thermo/synoptic:
+
+- held-out delta 2022/2023/2024 `+0.005291/+0.003566/-0.000062`
+- group delta g1/g2/g3 `+0.004727/+0.002755/-0.000305`
+- standalone `+0.006356`, final `+0.002392`로 안정적인 개선. 사용자 결정으로 별도 GFS expert 채택
+
+Surface-regime:
+
+- held-out delta 2022/2023/2024 `-0.000709/+0.000086/-0.000598`
+- group delta g1/g2/g3 `+0.000686/+0.000189/-0.002678`
+- standalone과 final blend가 모두 하락해 family 전체 기각
+
+### Phase 12-B GFS Vertical+Thermo feature-concat ablation
+
+2026-07-16, code commit `ac2e8f6`. 채택된 두 family를 별도 expert로 유지하는 것과 구분하기 위해, 두 입력을 한 GFS encoder에 넣은 34채널 combined expert를 추가 검증했다. Surface-regime은 포함하지 않았다.
+
+| GFS expert | Standalone Score | Final source blend |
+|---|---:|---:|
+| Vertical-wind | 0.613392 | 0.633095 |
+| Thermo/synoptic | 0.618382 | 0.633318 |
+| Vertical+Thermo 34ch | 0.619764 | 0.631735 |
+
+Combined final metric:
+
+```text
+Score = 0.631735
+NMAE = 0.135818
+FiCR  = 0.399288
+```
+
+- combined held-out delta vs GFS10 baseline 2022/2023/2024 `+0.004901/-0.002169/+0.001776`
+- combined group delta g1/g2/g3 `+0.001778/+0.001734/-0.001084`
+- feature concat은 GFS standalone을 더 올렸지만 LDAPS/GEFS와의 complementarity가 줄어 final blend는 두 단독 family replacement보다 낮음
+- Vertical과 Thermo는 각각 별도 GFS expert로 채택하고, 34채널 combined expert는 final source blend용으로 미채택
+- 두 GFS experts를 동시에 넣는 4-source blend는 별도 승인 대상이며 이번 실험에 포함하지 않음
+- 모든 OOF/blend prediction은 69,747행, duplicate 0, non-finite 0; test/submission 없음
+
+산출물:
+
+```text
+Raw family OOF: results/source_experts_v1/gfs_raw_families_v1_f0f7b3d/
+Vertical blend: results/source_experts_v1/gfs_vertical_wind_blend_f0f7b3d/
+Thermo blend:   results/source_experts_v1/gfs_thermo_synoptic_blend_f0f7b3d/
+Surface blend:  results/source_experts_v1/gfs_surface_regime_blend_f0f7b3d/
+Combined OOF:   results/source_experts_v1/gfs_vertical_thermo_v1_ac2e8f6/
+Combined blend: results/source_experts_v1/gfs_vertical_thermo_blend_ac2e8f6/
+```
+
 ## 13. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.

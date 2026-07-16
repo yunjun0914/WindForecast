@@ -3117,6 +3117,20 @@ nonzero differences > 1e-9 = 0
 - Thermo/PBL은 2022만 개선하고 2023/g3 하락으로 noise 수준 미채택. Surface-regime은 기각. LDAPS raw family 직접입력 점검 종료, baseline `0.630926` 유지.
 - OOF: ignored `results/source_experts_v1/ldaps_raw_families_v1_2c5478b/`.
 
+### 2026-07-16 - GFS remaining raw family ablation
+
+- commit `f0f7b3d`, GFS10 core에서 Vertical-wind +13ch, Thermo/synoptic +11ch, Surface-regime +8ch를 독립 strict outer-year OOF. raw 28개 결측/비유한/상수 없음, family 혼합/subset 탐색 없음.
+- standalone: Vertical `0.613392` (`+0.001366`), Thermo `0.618382` (`+0.006356`), Surface `0.609827` (`-0.002199`).
+- source blend: Vertical `0.633095` (`+0.002169`), Thermo `0.633318` (`+0.002392`), Surface `0.630325` (`-0.000601`).
+- 사용자 결정으로 Vertical과 Thermo를 각각 별도 GFS expert로 채택. Surface는 기각. OOF: ignored `results/source_experts_v1/gfs_raw_families_v1_f0f7b3d/`.
+
+### 2026-07-16 - GFS Vertical+Thermo feature concat
+
+- commit `ac2e8f6`, 채택 두 family를 한 34ch GFS encoder에 결합. Surface 미포함, 동일 OOF 조건.
+- standalone `0.619764`로 단독 family보다 강했지만 final source blend `0.631735`로 Vertical `0.633095`, Thermo `0.633318`보다 낮음.
+- combined는 final blend용 미채택. Vertical/Thermo 별도 experts 유지; 4-source 동시 blend는 미실험. test/submission 없음.
+- OOF: ignored `results/source_experts_v1/gfs_vertical_thermo_v1_ac2e8f6/`.
+
 ### 2026-07-16 - GEFS ensemble spread TREE OOF v1
 
 - 외부데이터 1호: GEFS 앙상블 mean/spread(u/v 10m·925·850·700hPa + gust)를 AWS `noaa-gefs-pds`에서 D-2 18Z cycle만 수집. run 2021-12-29~2025-12-30 49개월 결측 0, 파일별 S3 Last-Modified(공개시각) 소명 메타 저장. 수집기 `data/external/collect_gefs_ensemble.py`, 시간당 피처 `data/external/build_gefs_features.py`.
