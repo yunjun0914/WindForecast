@@ -17,6 +17,9 @@ from utils.source_expert_dataset import (
     LDAPS_BLH_FLOOR_M,
     LDAPS_BLH_RATIO_SPEC,
     LDAPS_HUB_OVER_BLH_CHANNEL,
+    LDAPS_PRESSURE_TENDENCY_CHANNEL,
+    LDAPS_PRESSURE_TENDENCY_SPEC,
+    LDAPS_SURFACE_PRESSURE_COLUMN,
     LDAPS_SURFACE_PRESSURE_SPEC,
     TURBINE_HUB_HEIGHT_M,
     apply_gefs_publication_fallback,
@@ -24,6 +27,7 @@ from utils.source_expert_dataset import (
     build_gefs_spread_core_tensor,
     build_grid_source_core_tensor,
     build_ldaps_blh_ratio_tensor,
+    build_ldaps_pressure_tendency_tensor,
     fit_source_channel_scaler,
     select_gefs_issues,
     transform_source_channels,
@@ -211,6 +215,25 @@ class SourceExpertDatasetTest(unittest.TestCase):
             TURBINE_HUB_HEIGHT_M / LDAPS_BLH_FLOOR_M,
             places=6,
         )
+
+    def test_ldaps_pressure_tendency_replaces_raw_pressure_with_one_slope(self):
+        tensor = build_ldaps_pressure_tendency_tensor(
+            make_grid_frame(LDAPS_SURFACE_PRESSURE_SPEC)
+        )
+
+        self.assertEqual(tensor.values.shape, (2, 24, 10, 4, 5))
+        self.assertEqual(
+            tensor.channel_names,
+            LDAPS_PRESSURE_TENDENCY_SPEC.output_channels,
+        )
+        self.assertNotIn(LDAPS_SURFACE_PRESSURE_COLUMN, tensor.channel_names)
+        self.assertEqual(
+            set(tensor.channel_names) - set(LDAPS_CORE_SPEC.output_channels),
+            {LDAPS_PRESSURE_TENDENCY_CHANNEL},
+        )
+        tendency_index = tensor.channel_names.index(LDAPS_PRESSURE_TENDENCY_CHANNEL)
+        tendency = tensor.values[:, :, tendency_index][:, :, tensor.spatial_mask]
+        self.assertTrue(np.allclose(tendency, 1.0))
 
     def test_gfs_core_has_only_approved_channels(self):
         tensor = build_grid_source_core_tensor(make_grid_frame(GFS_CORE_SPEC), GFS_CORE_SPEC)

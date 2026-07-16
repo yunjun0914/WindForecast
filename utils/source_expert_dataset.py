@@ -18,6 +18,9 @@ TURBINE_HUB_HEIGHT_M = 117.0
 LDAPS_BLH_FLOOR_M = 20.0
 LDAPS_BLH_COLUMN = "etc_0_blh"
 LDAPS_HUB_OVER_BLH_CHANNEL = "ldaps_hub_over_blh"
+LDAPS_SURFACE_PRESSURE_COLUMN = "surface_0_sp"
+LDAPS_PRESSURE_TENDENCY_CHANNEL = "ldaps_pressure_tendency_3h"
+LDAPS_PRESSURE_TENDENCY_HOURS = 3
 
 
 @dataclass(frozen=True)
@@ -113,7 +116,15 @@ LDAPS_SURFACE_PRESSURE_SPEC = GridSourceSpec(
     name="ldaps_core_sp",
     layout=LDAPS_CORE_SPEC.layout,
     vectors=LDAPS_CORE_SPEC.vectors,
-    scalar_channels=("surface_0_sp",),
+    scalar_channels=(LDAPS_SURFACE_PRESSURE_COLUMN,),
+)
+
+
+LDAPS_PRESSURE_TENDENCY_SPEC = GridSourceSpec(
+    name="ldaps_pressure_tendency_core",
+    layout=LDAPS_CORE_SPEC.layout,
+    vectors=LDAPS_CORE_SPEC.vectors,
+    scalar_channels=(LDAPS_PRESSURE_TENDENCY_CHANNEL,),
 )
 
 
@@ -249,6 +260,10 @@ def source_required_columns(spec: GridSourceSpec) -> tuple[str, ...]:
 
 def ldaps_blh_ratio_required_columns() -> tuple[str, ...]:
     return (*source_required_columns(LDAPS_CORE_SPEC), LDAPS_BLH_COLUMN)
+
+
+def ldaps_pressure_tendency_required_columns() -> tuple[str, ...]:
+    return source_required_columns(LDAPS_SURFACE_PRESSURE_SPEC)
 
 
 def _time_features(forecast_times: np.ndarray, issue_times: np.ndarray) -> np.ndarray:
@@ -449,6 +464,57 @@ def build_ldaps_blh_ratio_tensor(
         LDAPS_BLH_FLOOR_M,
     )
     return build_grid_source_core_tensor(work, LDAPS_BLH_RATIO_SPEC, labels=labels)
+
+
+def build_ldaps_pressure_tendency_tensor(
+    frame: pd.DataFrame,
+    labels: pd.DataFrame | None = None,
+) -> SourceIssueTensor:
+    pressure_tensor = build_grid_source_core_tensor(
+        frame,
+        LDAPS_SURFACE_PRESSURE_SPEC,
+        labels=labels,
+    )
+    pressure_index = pressure_tensor.channel_names.index(LDAPS_SURFACE_PRESSURE_COLUMN)
+    step_indices = np.arange(len(EXPECTED_LEADS))
+    left_indices = np.maximum(step_indices - LDAPS_PRESSURE_TENDENCY_HOURS, 0)
+    right_indices = np.minimum(
+        step_indices + LDAPS_PRESSURE_TENDENCY_HOURS,
+        len(EXPECTED_LEADS) - 1,
+    )
+    elapsed_hours = (
+        EXPECTED_LEADS[right_indices] - EXPECTED_LEADS[left_indices]
+    ).astype(np.float32)
+
+    pressure = pressure_tensor.values[:, :, pressure_index]
+    pressure_missing = pressure_tensor.missing_mask[:, :, pressure_index]
+    tendency = (
+        pressure[:, right_indices] - pressure[:, left_indices]
+    ) / elapsed_hours[None, :, None, None]
+    tendency_missing = (
+        pressure_missing[:, right_indices] | pressure_missing[:, left_indices]
+    )
+
+    value_channels: list[np.ndarray] = []
+    missing_channels: list[np.ndarray] = []
+    for channel in LDAPS_PRESSURE_TENDENCY_SPEC.output_channels:
+        if channel == LDAPS_PRESSURE_TENDENCY_CHANNEL:
+            value_channels.append(tendency)
+            missing_channels.append(tendency_missing)
+            continue
+        source_index = pressure_tensor.channel_names.index(channel)
+        value_channels.append(pressure_tensor.values[:, :, source_index])
+        missing_channels.append(pressure_tensor.missing_mask[:, :, source_index])
+
+    tensor = replace(
+        pressure_tensor,
+        source=LDAPS_PRESSURE_TENDENCY_SPEC.name,
+        values=np.stack(value_channels, axis=2).astype(np.float32),
+        missing_mask=np.stack(missing_channels, axis=2),
+        channel_names=LDAPS_PRESSURE_TENDENCY_SPEC.output_channels,
+    )
+    tensor.validate()
+    return tensor
 
 
 def _nearest_axis(values: Iterable[float], target: float, count: int) -> np.ndarray:
