@@ -9,6 +9,7 @@ from utils.source_expert_dataset import (
     EXPECTED_LEADS,
     GEFS_FHOURS,
     GFS_CORE_SPEC,
+    GFS_10M_CORE_SPEC,
     GFS_SURFACE_PRESSURE_SPEC,
     LDAPS_CORE_SPEC,
     LDAPS_SURFACE_PRESSURE_SPEC,
@@ -169,6 +170,23 @@ class SourceExpertDatasetTest(unittest.TestCase):
                 "wind_80m_speed",
                 "wind_100m_speed",
             ),
+        )
+
+    def test_gfs_10m_core_adds_only_one_vector_and_speed(self):
+        core = build_grid_source_core_tensor(make_grid_frame(GFS_CORE_SPEC), GFS_CORE_SPEC)
+        ten_meter = build_grid_source_core_tensor(
+            make_grid_frame(GFS_10M_CORE_SPEC),
+            GFS_10M_CORE_SPEC,
+        )
+
+        self.assertEqual(ten_meter.values.shape, (2, 24, 10, 3, 3))
+        self.assertEqual(
+            set(ten_meter.channel_names) - set(core.channel_names),
+            {
+                "heightAboveGround_10_10u",
+                "heightAboveGround_10_10v",
+                "wind_10m_speed",
+            },
         )
 
     def test_surface_pressure_variants_add_exactly_one_scalar_channel(self):

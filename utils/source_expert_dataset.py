@@ -106,6 +106,21 @@ GFS_CORE_SPEC = GridSourceSpec(
 )
 
 
+GFS_10M_CORE_SPEC = GridSourceSpec(
+    name="gfs_10m_core",
+    layout=GFS_CORE_SPEC.layout,
+    vectors=(
+        *GFS_CORE_SPEC.vectors,
+        VectorChannels(
+            "wind_10m",
+            "heightAboveGround_10_10u",
+            "heightAboveGround_10_10v",
+        ),
+    ),
+    scalar_channels=GFS_CORE_SPEC.scalar_channels,
+)
+
+
 GFS_SURFACE_PRESSURE_SPEC = GridSourceSpec(
     name="gfs_core_sp",
     layout=GFS_CORE_SPEC.layout,
