@@ -3128,8 +3128,16 @@ nonzero differences > 1e-9 = 0
 
 - commit `ac2e8f6`, 채택 두 family를 한 34ch GFS encoder에 결합. Surface 미포함, 동일 OOF 조건.
 - standalone `0.619764`로 단독 family보다 강했지만 final source blend `0.631735`로 Vertical `0.633095`, Thermo `0.633318`보다 낮음.
-- combined는 final blend용 미채택. Vertical/Thermo 별도 experts 유지; 4-source 동시 blend는 미실험. test/submission 없음.
+- 후속 사용자 결정으로 성능 하락을 감수하고 combined를 현재 GFS backbone으로 채택. 이후 source blend 기준은 `LDAPS + GFS combined + GEFS mean = 0.631735`. test/submission 없음.
 - OOF: ignored `results/source_experts_v1/gfs_vertical_thermo_v1_ac2e8f6/`.
+
+### 2026-07-16 - GEFS raw family split ablation
+
+- commit `bbd8196`, 현재 GEFS mean core에서 Mean700 `+3ch`, Near spread `+7ch`, Upper spread `+6ch`를 세 병렬 프로세스로 독립 strict outer-year OOF. family 합본/subset 탐색 없음.
+- standalone: Mean700 `0.610095` (`-0.000826`), Near spread `0.609201` (`-0.001720`), Upper spread `0.601498` (`-0.009423`) vs GEFS mean `0.610921`.
+- GFS Vertical/Thermo combined backbone 위 source blend: Mean700 `0.630369` (`-0.001366`), Near `0.629984` (`-0.001751`), Upper `0.629894` (`-0.001841`) vs current `0.631735`.
+- 세 direct feature family 모두 미채택. relative spread/confidence gating은 별도 미실험 후보로 유지. 모든 OOF/blend 69,747행, duplicate/non-finite 0, test/submission 없음.
+- OOF: ignored `results/source_experts_v1/gefs_raw_families_v1_bbd8196/`.
 
 ### 2026-07-16 - GEFS ensemble spread TREE OOF v1
 

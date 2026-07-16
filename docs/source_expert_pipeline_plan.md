@@ -1059,8 +1059,9 @@ FiCR  = 0.399288
 - combined held-out delta vs GFS10 baseline 2022/2023/2024 `+0.004901/-0.002169/+0.001776`
 - combined group delta g1/g2/g3 `+0.001778/+0.001734/-0.001084`
 - feature concat은 GFS standalone을 더 올렸지만 LDAPS/GEFS와의 complementarity가 줄어 final blend는 두 단독 family replacement보다 낮음
-- Vertical과 Thermo는 각각 별도 GFS expert로 채택하고, 34채널 combined expert는 final source blend용으로 미채택
-- 두 GFS experts를 동시에 넣는 4-source blend는 별도 승인 대상이며 이번 실험에 포함하지 않음
+- Vertical과 Thermo family는 각각 유효한 입력군으로 채택
+- 후속 사용자 결정으로, final blend 하락을 감수하고 두 family를 한 모델에 넣은 34채널 combined expert를 현재 GFS backbone으로 채택
+- 이후 source feature 실험의 고정 기준은 `LDAPS core + GFS Vertical/Thermo 34ch + GEFS mean = 0.631735`
 - 모든 OOF/blend prediction은 69,747행, duplicate 0, non-finite 0; test/submission 없음
 
 산출물:
@@ -1074,7 +1075,72 @@ Combined OOF:   results/source_experts_v1/gfs_vertical_thermo_v1_ac2e8f6/
 Combined blend: results/source_experts_v1/gfs_vertical_thermo_blend_ac2e8f6/
 ```
 
-## 13. 계획 변경 규칙
+### Phase 13 GEFS raw family split ablation
+
+2026-07-16, code commit `bbd8196`. 과거 실패한 GEFS full-spread 7채널 직접입력을 반복하지 않고, 현재 mean core에서 신규 정보의 역할에 따라 세 family를 독립적으로 구성했다.
+
+```text
+Mean700      +3ch: 700hPa mean u/v/speed
+Near spread  +7ch: 10m/925hPa spread u/v/norm + gust spread
+Upper spread +6ch: 850/700hPa spread u/v/norm
+```
+
+`spread norm = sqrt(u_sprd^2 + v_sprd^2)`는 실제 speed 표준편차가 아닌 component uncertainty magnitude proxy다. 세 family는 Bear RTX 4080 한 장에서 세 프로세스로 병렬 실행했다. 현재 GFS backbone은 사용자 결정에 따라 Vertical/Thermo 34ch combined를 사용했다.
+
+Standalone:
+
+| GEFS expert | Score | NMAE | FiCR | Delta vs mean core |
+|---|---:|---:|---:|---:|
+| GEFS mean core | 0.610921 | 0.152362 | 0.374204 | - |
+| Mean700 | 0.610095 | 0.150794 | 0.370984 | -0.000826 |
+| Near spread | 0.609201 | 0.151570 | 0.369973 | -0.001720 |
+| Upper spread | 0.601498 | 0.156321 | 0.359317 | -0.009423 |
+
+Final source blend:
+
+| GEFS replacement | Score | NMAE | FiCR | Delta vs current baseline |
+|---|---:|---:|---:|---:|
+| Current GEFS mean baseline | 0.631735 | 0.135818 | 0.399288 | - |
+| Mean700 | 0.630369 | 0.136822 | 0.397561 | -0.001366 |
+| Near spread | 0.629984 | 0.136754 | 0.396722 | -0.001751 |
+| Upper spread | 0.629894 | 0.136613 | 0.396401 | -0.001841 |
+
+Mean700:
+
+- held-out delta 2022/2023/2024 `-0.001901/-0.002614/+0.000614`
+- group delta g1/g2/g3 `-0.000867/-0.001378/-0.001852`
+- NMAE standalone은 개선됐지만 FiCR이 더 하락했고 final blend도 세 group 중 어느 곳도 개선하지 못함
+
+Near spread:
+
+- held-out delta 2022/2023/2024 `-0.000150/-0.003894/-0.000330`
+- group delta g1/g2/g3 `-0.002650/-0.000210/-0.002393`
+- 이전 full-spread보다 의미를 좁혔지만 direct feature로는 final blend를 개선하지 못함
+
+Upper spread:
+
+- held-out delta 2022/2023/2024 `-0.000969/-0.002766/-0.001135`
+- group delta g1/g2/g3 `-0.000555/-0.002360/-0.002608`
+- standalone과 모든 held-out year가 하락해 direct feature family 기각
+
+공통:
+
+- 세 GEFS OOF와 세 blend prediction은 각각 69,747행, duplicate 0, non-finite 0
+- Mean700, Near spread, Upper spread 직접입력은 현재 backbone에 미채택
+- spread 정보의 relative uncertainty 또는 source confidence gating 사용은 미실험이며 이번 결과에 포함하지 않음
+- family 합본, subset, weight 후속 탐색, test prediction, submission 없음
+
+산출물:
+
+```text
+Bear OOF:  /home/yunjun0914/windforecast_runs/source_experts_v1/gefs_raw_families_v1_bbd8196/
+Local OOF: results/source_experts_v1/gefs_raw_families_v1_bbd8196/
+Mean blend:  results/source_experts_v1/gefs_mean700_blend_bbd8196/
+Near blend:  results/source_experts_v1/gefs_near_spread_blend_bbd8196/
+Upper blend: results/source_experts_v1/gefs_upper_spread_blend_bbd8196/
+```
+
+## 14. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.
 
