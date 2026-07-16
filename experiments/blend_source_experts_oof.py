@@ -46,6 +46,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gefs-variant", default="gefs_mean_core")
     parser.add_argument("--nested-variant", default=NESTED_VARIANT)
     parser.add_argument("--output-prefix", default="source_expert_convex_nested")
+    parser.add_argument(
+        "--expert",
+        action="append",
+        nargs=3,
+        metavar=("NAME", "FILE", "VARIANT"),
+        help=(
+            "Repeatable custom expert specification. When present, these experts "
+            "replace the legacy LDAPS/GFS/GEFS inputs in the supplied order."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -79,8 +89,14 @@ def default_source_inputs(input_dir: Path) -> dict[str, tuple[Path, str]]:
 def load_aligned_predictions(
     source_inputs: dict[str, tuple[Path, str]],
 ) -> pd.DataFrame:
-    if tuple(source_inputs) != SOURCE_ORDER:
-        raise ValueError(f"Source input order must be {SOURCE_ORDER}")
+    source_order = tuple(source_inputs)
+    if len(source_order) < 2:
+        raise ValueError("At least two source experts are required")
+    invalid_names = [
+        source for source in source_order if not source.replace("_", "").isalnum()
+    ]
+    if invalid_names:
+        raise ValueError(f"Source names must be alphanumeric identifiers: {invalid_names}")
     aligned = None
     for source, (path, expected_variant) in source_inputs.items():
         frame = pd.read_csv(path, encoding="utf-8-sig")
@@ -116,12 +132,12 @@ def load_aligned_predictions(
             aligned = aligned.drop(columns="_merge")
     if aligned is None:
         raise ValueError("No source predictions loaded")
-    actual_columns = [f"actual_{source}" for source in SOURCE_ORDER]
+    actual_columns = [f"actual_{source}" for source in source_order]
     reference = aligned[actual_columns[0]].to_numpy(float)
     for column in actual_columns[1:]:
         if not np.allclose(reference, aligned[column].to_numpy(float), equal_nan=True):
             raise ValueError(f"Official targets differ across source OOF files: {column}")
-    prediction_columns = [f"pred_{source}" for source in SOURCE_ORDER]
+    prediction_columns = [f"pred_{source}" for source in source_order]
     if not np.isfinite(aligned[prediction_columns].to_numpy(float)).all():
         raise ValueError("Source OOF predictions contain non-finite values")
     aligned["official_target"] = reference
@@ -167,17 +183,27 @@ def score_prediction(
     return score, mean_nmae, mean_ficr, group_rows
 
 
-def simplex_candidates(total_units: int) -> list[tuple[int, int, int]]:
-    candidates = []
-    for ldaps_units in range(total_units, -1, -1):
-        for gfs_units in range(total_units - ldaps_units, -1, -1):
-            gefs_units = total_units - ldaps_units - gfs_units
-            candidates.append((ldaps_units, gfs_units, gefs_units))
+def simplex_candidates(
+    total_units: int,
+    dimensions: int = len(SOURCE_ORDER),
+) -> list[tuple[int, ...]]:
+    if total_units < 0 or dimensions < 2:
+        raise ValueError("Simplex requires nonnegative units and at least two dimensions")
+    candidates: list[tuple[int, ...]] = []
+
+    def append_candidates(prefix: tuple[int, ...], remaining: int) -> None:
+        if len(prefix) == dimensions - 1:
+            candidates.append((*prefix, remaining))
+            return
+        for units in range(remaining, -1, -1):
+            append_candidates((*prefix, units), remaining - units)
+
+    append_candidates((), total_units)
     return candidates
 
 
 def local_candidates(
-    coarse_units: tuple[int, int, int],
+    coarse_units: tuple[int, ...],
     coarse_total: int = 40,
     fine_total: int = 200,
 ) -> list[tuple[int, int, int]]:
@@ -188,7 +214,7 @@ def local_candidates(
     radius = scale
     return [
         candidate
-        for candidate in simplex_candidates(fine_total)
+        for candidate in simplex_candidates(fine_total, dimensions=len(coarse_units))
         if all(
             abs(candidate[index] - center[index]) <= radius
             for index in range(len(center))
@@ -198,18 +224,61 @@ def local_candidates(
 
 def search_candidates(
     frame: pd.DataFrame,
-    candidates: list[tuple[int, int, int]],
+    candidates: list[tuple[int, ...]],
     total_units: int,
+    source_order: tuple[str, ...] = SOURCE_ORDER,
+    batch_size: int = 128,
 ) -> tuple[np.ndarray, float, int]:
-    matrix = frame[[f"pred_{source}" for source in SOURCE_ORDER]].to_numpy(float)
+    if not candidates:
+        raise ValueError("Candidate list is empty")
+    matrix = frame[[f"pred_{source}" for source in source_order]].to_numpy(float)
+    if not np.isfinite(matrix).all():
+        raise ValueError("Expert prediction matrix contains non-finite values")
+
+    scored_groups = []
+    for group in TARGET_COLS:
+        group_mask = frame["group"].eq(group).to_numpy()
+        actual = frame["official_target"].to_numpy(float)
+        scored = group_mask & np.isfinite(actual)
+        scored &= actual >= GROUP_CAPACITY_KWH[group] * 0.10
+        if not scored.any():
+            continue
+        scored_groups.append(
+            (
+                np.flatnonzero(scored),
+                actual[scored],
+                float(GROUP_CAPACITY_KWH[group]),
+            )
+        )
+    if not scored_groups:
+        raise ValueError("No groups available for blend scoring")
+
     best_weights = None
     best_score = -np.inf
-    for candidate in candidates:
-        weights = np.asarray(candidate, dtype=float) / float(total_units)
-        score, _, _, _ = score_prediction(frame, matrix @ weights)
-        if score > best_score + 1e-12:
-            best_score = score
-            best_weights = weights
+    for start in range(0, len(candidates), batch_size):
+        candidate_batch = candidates[start : start + batch_size]
+        weights = np.asarray(candidate_batch, dtype=float) / float(total_units)
+        predictions = matrix @ weights.T
+        mean_nmae = np.zeros(len(candidate_batch), dtype=float)
+        mean_ficr = np.zeros(len(candidate_batch), dtype=float)
+        for indices, actual, capacity in scored_groups:
+            error_rate = np.abs(predictions[indices] - actual[:, None]) / capacity
+            mean_nmae += error_rate.mean(axis=0)
+            unit_price = np.select(
+                [error_rate <= 0.06, error_rate <= 0.08],
+                [4.0, 3.0],
+                default=0.0,
+            )
+            mean_ficr += (actual[:, None] * unit_price).sum(axis=0) / (
+                actual.sum() * 4.0
+            )
+        mean_nmae /= len(scored_groups)
+        mean_ficr /= len(scored_groups)
+        scores = 0.5 * (1.0 - mean_nmae) + 0.5 * mean_ficr
+        for offset, score in enumerate(scores):
+            if score > best_score + 1e-12:
+                best_score = float(score)
+                best_weights = weights[offset]
     if best_weights is None:
         raise RuntimeError("Convex weight search selected no candidate")
     return best_weights, best_score, len(candidates)
@@ -218,6 +287,7 @@ def search_candidates(
 def select_nested_weights(
     frame: pd.DataFrame,
     held_out_year: int,
+    source_order: tuple[str, ...] = SOURCE_ORDER,
 ) -> dict[str, object]:
     train_years = sorted(
         int(year) for year in frame["pred_year"].unique() if int(year) != held_out_year
@@ -228,15 +298,21 @@ def select_nested_weights(
         raise ValueError(f"Invalid meta fold for held-out year {held_out_year}")
 
     coarse, coarse_score, coarse_count = search_candidates(
-        train, simplex_candidates(40), total_units=40
+        train,
+        simplex_candidates(40, dimensions=len(source_order)),
+        total_units=40,
+        source_order=source_order,
     )
     coarse_units = tuple(int(round(weight * 40)) for weight in coarse)
     fine_candidates = local_candidates(coarse_units)
     weights, train_score, fine_count = search_candidates(
-        train, fine_candidates, total_units=200
+        train,
+        fine_candidates,
+        total_units=200,
+        source_order=source_order,
     )
     matrix = validation[
-        [f"pred_{source}" for source in SOURCE_ORDER]
+        [f"pred_{source}" for source in source_order]
     ].to_numpy(float)
     validation_prediction = matrix @ weights
     validation_score, validation_nmae, validation_ficr, group_rows = score_prediction(
@@ -264,23 +340,33 @@ def main() -> None:
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    default_inputs = default_source_inputs(input_dir)
-    source_inputs = {
-        "ldaps_core": (
-            Path(args.ldaps_file) if args.ldaps_file else default_inputs["ldaps_core"][0],
-            args.ldaps_variant,
-        ),
-        "gfs_core": (
-            Path(args.gfs_file) if args.gfs_file else default_inputs["gfs_core"][0],
-            args.gfs_variant,
-        ),
-        "gefs_mean_core": (
-            Path(args.gefs_file)
-            if args.gefs_file
-            else default_inputs["gefs_mean_core"][0],
-            args.gefs_variant,
-        ),
-    }
+    if args.expert:
+        source_inputs = {}
+        for source, filename, variant in args.expert:
+            if source in source_inputs:
+                raise ValueError(f"Duplicate expert name: {source}")
+            source_inputs[source] = (Path(filename), variant)
+    else:
+        default_inputs = default_source_inputs(input_dir)
+        source_inputs = {
+            "ldaps_core": (
+                Path(args.ldaps_file)
+                if args.ldaps_file
+                else default_inputs["ldaps_core"][0],
+                args.ldaps_variant,
+            ),
+            "gfs_core": (
+                Path(args.gfs_file) if args.gfs_file else default_inputs["gfs_core"][0],
+                args.gfs_variant,
+            ),
+            "gefs_mean_core": (
+                Path(args.gefs_file)
+                if args.gefs_file
+                else default_inputs["gefs_mean_core"][0],
+                args.gefs_variant,
+            ),
+        }
+    source_order = tuple(source_inputs)
     aligned = load_aligned_predictions(source_inputs)
     years = sorted(int(year) for year in aligned["pred_year"].unique())
     if years != [2022, 2023, 2024]:
@@ -290,26 +376,26 @@ def main() -> None:
     weight_rows = []
     fold_rows = []
     for held_out_year in years:
-        result = select_nested_weights(aligned, held_out_year)
+        result = select_nested_weights(aligned, held_out_year, source_order=source_order)
         indices = result["validation_index"]
         nested_prediction[indices] = result["validation_prediction"]
         weights = result["weights"]
-        weight_rows.append(
-            {
-                "held_out_year": held_out_year,
-                "train_years": ",".join(map(str, result["train_years"])),
-                "ldaps_weight": weights[0],
-                "gfs_weight": weights[1],
-                "gefs_weight": weights[2],
-                "coarse_train_score": result["coarse_score"],
-                "refined_train_score": result["train_score"],
-                "held_out_score": result["validation_score"],
-                "held_out_nmae": result["validation_nmae"],
-                "held_out_ficr": result["validation_ficr"],
-                "coarse_candidates": result["coarse_candidates"],
-                "fine_candidates": result["fine_candidates"],
-            }
-        )
+        weight_row = {
+            "held_out_year": held_out_year,
+            "train_years": ",".join(map(str, result["train_years"])),
+            **{
+                f"{source}_weight": weights[index]
+                for index, source in enumerate(source_order)
+            },
+            "coarse_train_score": result["coarse_score"],
+            "refined_train_score": result["train_score"],
+            "held_out_score": result["validation_score"],
+            "held_out_nmae": result["validation_nmae"],
+            "held_out_ficr": result["validation_ficr"],
+            "coarse_candidates": result["coarse_candidates"],
+            "fine_candidates": result["fine_candidates"],
+        }
+        weight_rows.append(weight_row)
         for row in result["group_rows"]:
             fold_rows.append(
                 {
@@ -320,7 +406,7 @@ def main() -> None:
             )
         print(
             f"held_out={held_out_year} train={result['train_years']} "
-            f"weights={weights.round(3).tolist()} "
+            f"weights={dict(zip(source_order, weights.round(3)))} "
             f"train_score={result['train_score']:.6f} "
             f"held_out_score={result['validation_score']:.6f}",
             flush=True,
@@ -345,7 +431,7 @@ def main() -> None:
     nested_summary, nested_group_scores = pooled_oof_summary(nested)
 
     source_long = []
-    for source in SOURCE_ORDER:
+    for source in source_order:
         part = aligned[[*KEY_COLUMNS, "official_target"]].copy()
         part["variant"] = source_inputs[source][1]
         part["pred"] = aligned[f"pred_{source}"]
@@ -381,12 +467,13 @@ def main() -> None:
         },
         "constraints": {"nonnegative": True, "sum_to_one": True, "intercept": False},
         "weight_scope": "one common source weight vector per held-out year",
+        "source_order": list(source_order),
         "search": {
             "coarse_step": 0.025,
             "local_refinement_step": 0.005,
             "local_radius_per_weight": 0.025,
             "objective": "pooled official hard Score on the other two OOF years",
-            "tie_break": "candidate order favors more LDAPS, then more GFS",
+            "tie_break": "candidate order favors earlier source_order experts",
         },
         "folds": weight_rows,
         "test_prediction_created": False,

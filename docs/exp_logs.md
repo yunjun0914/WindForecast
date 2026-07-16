@@ -3162,3 +3162,11 @@ nonzero differences > 1e-9 = 0
 - held-out delta `+0.001483/-0.001224/+0.001616`, group delta `-0.000570/+0.003258/-0.001995`. g2 개선이 g1/g3와 2023 하락으로 상쇄.
 - Density `0.633330`, Spatial `0.633498`보다 각각 `-0.001364/-0.001532` 낮아 combined는 미채택. 두 단독 experts는 채택 유지.
 - OOF/blend 69,747행, duplicate/non-finite 0. test/submission 없음. OOF: ignored `results/source_experts_v1/ldaps_density_spatial_v1_5515d6e/`.
+
+### 2026-07-16 - LDAPS family-separated expert blend
+
+- 기존 Density 15ch와 Spatial 18ch OOF를 합치지 않고 독립 experts로 투입하고, GFS Vertical/Thermo와 GEFS mean까지 4-way strict outer-year hard-Score convex blend. 재학습·추가 튜닝 없음.
+- 기존 3-expert Density blend weight와 최종 `0.633330`을 정확히 재현해 일반화 코드 호환성 확인.
+- 4-expert final `0.632478` (`NMAE 0.136106`, `FiCR 0.401062`): baseline 대비 `+0.000743`, 24ch 합본 대비 `+0.000512`지만 Density 단독 대비 `-0.000852`, Spatial 단독 대비 `-0.001020`.
+- held-out weight Density/Spatial/GFS/GEFS: 2022 `0.470/0.150/0.205/0.175`, 2023 `0.110/0.370/0.490/0.030`, 2024 `0.245/0.370/0.200/0.185`. 2023 held-out `0.621815` 하락.
+- 두 family 모두 nonzero weight를 받아 분리 신호는 있으나, 두 meta-train year에서 4D hard-Score weight가 불안정해 미채택. 추가 탐색/submission 없음. OOF: ignored `results/source_experts_v1/ldaps_family_experts_blend_bac7bb9/`.

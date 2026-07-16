@@ -56,6 +56,11 @@ class SourceExpertBlendTest(unittest.TestCase):
         self.assertTrue(all(sum(candidate) == 200 for candidate in local))
         self.assertTrue(all(abs(candidate[0] - 140) <= 5 for candidate in local))
 
+        four_expert = simplex_candidates(40, dimensions=4)
+        self.assertEqual(len(four_expert), 12341)
+        self.assertTrue(all(len(candidate) == 4 for candidate in four_expert))
+        self.assertTrue(all(sum(candidate) == 40 for candidate in four_expert))
+
     def test_nested_weight_selection_never_uses_held_out_year(self):
         rows = []
         for year in [2022, 2023, 2024]:

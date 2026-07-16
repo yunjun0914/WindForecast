@@ -1271,7 +1271,60 @@ OOF:   results/source_experts_v1/ldaps_density_spatial_v1_5515d6e/
 Blend: results/source_experts_v1/ldaps_density_spatial_blend_5515d6e/
 ```
 
-## 16. 계획 변경 규칙
+### Phase 16 LDAPS family-separated expert blend
+
+2026-07-16. Density/Power와 Spatial Flow를 한 24ch encoder로 합치지 않고 각각 독립 expert로 유지한 뒤, 현재 GFS Vertical/Thermo와 GEFS mean을 함께 4-way convex blend했다.
+
+```text
+LDAPS Density expert  15ch ─┐
+LDAPS Spatial expert  18ch ─┼─ nested hard-Score convex blend
+GFS Vertical/Thermo        ─┤
+GEFS mean                  ─┘
+```
+
+- 기존 strict outer-year OOF prediction만 재사용. 모델 재학습 없음
+- held-out year를 제외한 두 OOF year의 pooled official hard Score로 weight 선택
+- nonnegative, sum-to-one, intercept 없음
+- coarse `0.025`, local refinement `0.005`, 공통 weight vector 1개/held-out year
+- 기존 3-expert Density blend를 재실행해 세 fold weight와 최종 `0.633330`이 정확히 재현됨
+
+| 구성 | Final source blend | Delta vs current baseline |
+|---|---:|---:|
+| Current LDAPS/GFS/GEFS | 0.631735 | - |
+| Density expert only | 0.633330 | +0.001595 |
+| Spatial expert only | 0.633498 | +0.001763 |
+| Density+Spatial 24ch encoder | 0.631966 | +0.000231 |
+| Density+Spatial separate experts | 0.632478 | +0.000743 |
+
+4-expert final metric:
+
+```text
+Score = 0.632478
+NMAE = 0.136106
+FiCR  = 0.401062
+```
+
+| Held-out | Density | Spatial | GFS | GEFS | Score |
+|---:|---:|---:|---:|---:|---:|
+| 2022 | 0.470 | 0.150 | 0.205 | 0.175 | 0.636182 |
+| 2023 | 0.110 | 0.370 | 0.490 | 0.030 | 0.621815 |
+| 2024 | 0.245 | 0.370 | 0.200 | 0.185 | 0.651941 |
+
+- 24ch 합본보다는 `+0.000512` 높아 family 분리 신호는 확인
+- current baseline보다 `+0.000743` 높지만 Density 단독보다 `-0.000852`, Spatial 단독보다 `-0.001020`
+- group delta vs current baseline g1/g2/g3 `+0.001627/+0.001554/-0.000952`
+- 두 LDAPS expert는 모든 fold에서 nonzero weight를 받았지만 weight가 연도별로 크게 변함
+- 두 meta-train year로 4개 hard-Score weight를 고르면 2023 held-out이 하락하여 단독 expert 이득을 상쇄
+- family-separated 4-way blend는 현재 미채택. 추가 weight 조정이나 subset 탐색 없음
+- OOF prediction 69,747행, duplicate 0, non-finite 0. test/submission 없음
+
+산출물:
+
+```text
+results/source_experts_v1/ldaps_family_experts_blend_bac7bb9/
+```
+
+## 17. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.
 
