@@ -653,9 +653,28 @@ g3 = -0.003286
 - seed42, pure 6%, h64 3-block full-context TCN, outer-year hard Score checkpoint 등 core와 동일
 - pressure tensor `9 -> 15` channels, gust tensor `1 -> 2` channels
 - 전체 FiCR은 `+0.001364`였지만 NMAE가 `+0.005834` 악화
-- standalone 유지 기준을 충족하지 못해 raw spread S1 variant는 기각
-- S2 spread norm/relative spread와 source blend 교체는 사용자 승인 전 자동 실행하지 않음
+- standalone 결과만으로 채택 여부를 판정하지 않고, 최종 source ensemble에서 matched replacement를 추가 평가
 - test prediction과 submission 없음
+
+Final source ensemble comparison:
+
+```text
+baseline = LDAPS core + GFS core + GEFS mean core
+variant  = LDAPS core + GFS core + GEFS mean/raw-spread core
+```
+
+| Ensemble | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| core source convex blend | 0.630831 | 0.137974 | 0.399637 | - |
+| GEFS spread replacement | 0.630390 | 0.139286 | 0.400066 | -0.000441 |
+
+- 동일 leave-one-year-out meta hard Score, nonnegative/sum-to-one, 2.5% coarse + 0.5% local refinement
+- held-out delta 2022/2023/2024 `-0.000717/+0.001290/-0.001245`
+- group delta g1/g2/g3 `+0.001631/+0.000124/-0.003079`
+- GEFS weight는 baseline `11/23/18.5%`에서 spread variant `8/7/13.5%`로 감소
+- FiCR은 소폭 좋아졌지만 NMAE와 g3가 악화되어 최종 ensemble Score 하락
+- raw spread S1은 **최종 source ensemble 기준으로 기각**
+- S2 spread norm/relative spread는 사용자 승인 전 자동 실행하지 않음
 
 산출물:
 
@@ -663,6 +682,7 @@ g3 = -0.003286
 Duck: /home/yunjun0914/windforecast_runs/source_experts_v1/gefs_spread_s1_v1_29f50c9/
 Local: results/source_experts_v1/gefs_spread_s1_v1_29f50c9/
 OOF:   gefs_spread_core_oof_predictions.csv
+Blend: results/source_experts_v1/gefs_spread_s1_blend_29f50c9/
 ```
 
 ## 13. 계획 변경 규칙

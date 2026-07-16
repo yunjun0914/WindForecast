@@ -3062,7 +3062,17 @@ nonzero differences > 1e-9 = 0
 
 ### 2026-07-16 - GEFS raw spread S1 ablation
 
-- commit `29f50c9`, GEFS mean-core에 10/925/850hPa `u/v spread` 6개와 `gust spread` 1개만 추가. norm/relative/confidence/700hPa/blend 없음.
+- commit `29f50c9`, GEFS mean-core에 10/925/850hPa `u/v spread` 6개와 `gust spread` 1개만 추가. standalone 모델에는 norm/relative/confidence/700hPa 파생 없음.
 - 동일 seed42/pure6/h64 TCN outer-year OOF에서 `0.610921 -> 0.608686` (`-0.002235`). NMAE `+0.005834` 악화, FiCR `+0.001364` 개선.
-- group delta g1/g2/g3 `+0.000819/-0.004238/-0.003286`. standalone 기각, S2와 source blend는 자동 실행하지 않음. test/submission 없음.
+- standalone group delta g1/g2/g3 `+0.000819/-0.004238/-0.003286`; 단독 결과만으로는 판정하지 않고 final source ensemble까지 matched 비교.
+- LDAPS/GFS 고정, GEFS mean을 spread variant로 교체한 동일 meta-year convex blend는 `0.630831 -> 0.630390` (`-0.000441`). ensemble group delta `+0.001631/+0.000124/-0.003079`.
+- GEFS weight도 baseline `11/23/18.5%`에서 `8/7/13.5%`로 감소. raw spread S1은 final ensemble 기준 기각. S2/test/submission 없음.
 - OOF: ignored `results/source_experts_v1/gefs_spread_s1_v1_29f50c9/gefs_spread_core_oof_predictions.csv`.
+
+### 2026-07-16 - GEFS ensemble spread TREE OOF v1
+
+- 외부데이터 1호: GEFS 앙상블 mean/spread(u/v 10m·925·850·700hPa + gust)를 AWS `noaa-gefs-pds`에서 D-2 18Z cycle만 수집. run 2021-12-29~2025-12-30 49개월 결측 0, 파일별 S3 Last-Modified(공개시각) 소명 메타 저장. 수집기 `data/external/collect_gefs_ensemble.py`, 시간당 피처 `data/external/build_gefs_features.py`.
+- 로컬 CPU strict outer-year OOF. quota65 group TREE + OOF power-curve, 고정 LGBM params/seed paired 3-arm; submission 없음. baseline pooled `0.612173` (fold-mean `0.617494`; 저장된 tuned quota65 `0.622224`보다 낮은 generic params 기준).
+- `gefs_all` 19개 추가 pooled `0.614128` (`+0.001955`); 8개 group-year 중 6개 개선, pooled group delta g1 `+0.003158`/g2 `+0.000927`/g3 `+0.001781`로 세 group 모두 개선. 최대 하락은 g2-2023 `-0.003225`.
+- `gefs_spread`(spread 계열만) pooled `0.613389` (`+0.001216`, 5/8) — 기존 파이프라인에 없던 불확실성 신호의 단독 기여 확인.
+- 결론: 외부 NWP 앙상블의 첫 유효 신호. 크기는 TREE 기준 소폭이지만 전 group 일관 개선이며 spread가 실제 정보를 가짐. 다음 후보는 duck에서 tuned TREE/TCN 입력 추가와 blend-level spread 기반 regime gate. 결과: `results/tree_gefs_features_oof_v1_*`.
