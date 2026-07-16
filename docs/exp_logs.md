@@ -3109,6 +3109,14 @@ nonzero differences > 1e-9 = 0
 - pressure scalar 직접입력 계열은 종료. air density 같은 T/q 결합 물리량은 별도 후보이며 baseline `0.630926` 유지. test/submission 없음.
 - OOF: ignored `results/source_experts_v1/ldaps_mslp_p1_v1_eaaa6cb/ldaps_mslp_core_oof_predictions.csv`.
 
+### 2026-07-16 - LDAPS remaining raw family ablation
+
+- commit `2c5478b`, 남은 raw를 Thermo/PBL 5채널과 Surface-regime 14채널로 분리해 동일 seed42/pure6/h64 strict outer-year OOF. 상수 `surface_0_lsm` 제외, family 혼합/subset 탐색 없음.
+- standalone: Thermo/PBL `0.622694 -> 0.620316` (`-0.002378`), Surface-regime `0.622694 -> 0.618141` (`-0.004553`).
+- 채택 baseline 위 독립 blend: Thermo/PBL `0.631021` (`+0.000095`), Surface-regime `0.628907` (`-0.002019`).
+- Thermo/PBL은 2022만 개선하고 2023/g3 하락으로 noise 수준 미채택. Surface-regime은 기각. LDAPS raw family 직접입력 점검 종료, baseline `0.630926` 유지.
+- OOF: ignored `results/source_experts_v1/ldaps_raw_families_v1_2c5478b/`.
+
 ### 2026-07-16 - GEFS ensemble spread TREE OOF v1
 
 - 외부데이터 1호: GEFS 앙상블 mean/spread(u/v 10m·925·850·700hPa + gust)를 AWS `noaa-gefs-pds`에서 D-2 18Z cycle만 수집. run 2021-12-29~2025-12-30 49개월 결측 0, 파일별 S3 Last-Modified(공개시각) 소명 메타 저장. 수집기 `data/external/collect_gefs_ensemble.py`, 시간당 피처 `data/external/build_gefs_features.py`.

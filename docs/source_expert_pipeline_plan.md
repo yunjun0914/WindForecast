@@ -924,6 +924,72 @@ OOF:   ldaps_mslp_core_oof_predictions.csv
 Blend: results/source_experts_v1/ldaps_mslp_gfs10_blend_eaaa6cb/
 ```
 
+### Phase 11 LDAPS remaining raw family ablation
+
+2026-07-16, code commit `2c5478b`. 하나씩 보는 비용을 줄이기 위해 남은 LDAPS raw를 두 family로 묶되, 각 family는 core에 독립적으로 추가했다. 두 family를 서로 합치거나 하위 subset을 탐색하지 않았다.
+
+Thermo/PBL, 5채널:
+
+```text
+2m temperature, dew point, relative humidity, specific humidity, raw BLH
+LDAPS channels: 9 -> 14
+```
+
+Surface-regime, 14채널:
+
+```text
+radiation 4 + cloud 4 + precipitation 3 + snow 2 + terrain height 1
+LDAPS channels: 9 -> 23
+```
+
+20개 후보 raw는 결측·비유한값 0이었다. `surface_0_lsm`은 전체 420,864행이 값 1인 상수라 입력에서 제외했다. pressure fields와 5m wind는 이미 별도 실험했으므로 두 family에 중복 포함하지 않았다.
+
+Standalone:
+
+| Variant | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| LDAPS core | 0.622694 | 0.145303 | 0.390690 | - |
+| LDAPS + Thermo/PBL | 0.620316 | 0.150344 | 0.390975 | -0.002378 |
+| LDAPS + Surface-regime | 0.618141 | 0.147533 | 0.383816 | -0.004553 |
+
+각 family의 final source ensemble은 채택된 GFS 10m baseline 위에서 독립적으로 계산했다.
+
+| Ensemble | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| GFS 10m accepted baseline | 0.630926 | 0.137525 | 0.399378 | - |
+| LDAPS Thermo/PBL replacement | 0.631021 | 0.139480 | 0.401522 | +0.000095 |
+| LDAPS Surface-regime replacement | 0.628907 | 0.137659 | 0.395474 | -0.002019 |
+
+Thermo/PBL:
+
+- held-out delta 2022/2023/2024 `+0.003884/-0.001615/-0.000037`
+- group delta g1/g2/g3 `+0.001775/+0.000676/-0.002167`
+- FiCR 개선으로 pooled는 noise 수준 양수지만 standalone, NMAE, g3, 2023이 하락해 승격 기준 `+0.001` 미달
+- family raw 직접입력은 미채택하며 하위 raw subset을 자동 탐색하지 않음
+
+Surface-regime:
+
+- held-out delta 2022/2023/2024 `+0.001888/-0.001388/-0.004241`
+- group delta g1/g2/g3 `-0.001852/+0.001029/-0.005233`
+- standalone과 final ensemble 모두 명확히 하락해 family 전체 기각
+
+공통:
+
+- 네 prediction 파일 모두 69,747행, duplicate 0, non-finite 0
+- baseline은 `0.630926` 유지, test prediction과 submission 없음
+- 이 결과로 LDAPS raw family 직접입력 점검은 종료. air density나 shear 같은 파생 물리량은 별도 단계
+
+산출물:
+
+```text
+Bear:    /home/yunjun0914/windforecast_runs/source_experts_v1/ldaps_raw_families_v1_2c5478b/
+Local:   results/source_experts_v1/ldaps_raw_families_v1_2c5478b/
+OOF:     ldaps_thermo_pbl_core_oof_predictions.csv
+         ldaps_surface_regime_core_oof_predictions.csv
+Blend 1: results/source_experts_v1/ldaps_thermo_pbl_gfs10_blend_2c5478b/
+Blend 2: results/source_experts_v1/ldaps_surface_regime_gfs10_blend_2c5478b/
+```
+
 ## 13. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.
