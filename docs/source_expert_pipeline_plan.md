@@ -827,6 +827,52 @@ OOF:   ldaps_blh_ratio_core_oof_predictions.csv
 Blend: results/source_experts_v1/ldaps_blh_gfs10_blend_7c2f344/
 ```
 
+### Phase 9 LDAPS 3h pressure tendency P1 ablation
+
+2026-07-16, code commit `524c5bb`. raw surface pressure의 지형·고도 정적 성분을 제거하고 기압계 이동만 표현하기 위해 아래 한 채널만 추가했다.
+
+```text
+interior: dp3(t) = (sp[t+3] - sp[t-3]) / 6 hours
+edges:    available same-issue endpoints를 사용한 one-sided Pa/hour slope
+```
+
+raw pressure, pressure anomaly, spatial gradient와 다른 파생은 포함하지 않았다. LDAPS core의 9채널은 유지하고 tendency 한 채널만 추가했으며, 동일 seed42/pure6/h64 TCN strict outer-year OOF를 bear에서 실행했다.
+
+Standalone:
+
+| Variant | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| LDAPS core | 0.622694 | 0.145303 | 0.390690 | - |
+| LDAPS core + 3h pressure tendency | 0.620027 | 0.147783 | 0.387837 | -0.002667 |
+
+Final source ensemble comparison은 채택된 GFS 10m baseline 위에서 수행했다.
+
+```text
+baseline = LDAPS core + GFS 10m core + GEFS mean core
+variant  = LDAPS pressure-tendency core + GFS 10m core + GEFS mean core
+```
+
+| Ensemble | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| GFS 10m accepted baseline | 0.630926 | 0.137525 | 0.399378 | - |
+| LDAPS pressure-tendency replacement | 0.629523 | 0.138404 | 0.397449 | -0.001403 |
+
+- held-out delta 2022/2023/2024 `-0.001227/-0.002520/+0.000082`
+- group delta g1/g2/g3 `-0.002438/+0.000330/-0.002103`
+- standalone과 final ensemble에서 NMAE와 FiCR이 모두 악화됐으므로 tendency 직접입력은 기각
+- raw pressure, anomaly, spatial pressure gradient는 이번 실험에 포함하지 않았고 자동으로 이어서 실행하지 않음
+- baseline은 `0.630926` 유지; OOF와 blend 모두 69,747행, duplicate 0, non-finite 0
+- test prediction과 submission 없음
+
+산출물:
+
+```text
+Bear:  /home/yunjun0914/windforecast_runs/source_experts_v1/ldaps_pressure_tendency_p1_v1_524c5bb/
+Local: results/source_experts_v1/ldaps_pressure_tendency_p1_v1_524c5bb/
+OOF:   ldaps_pressure_tendency_core_oof_predictions.csv
+Blend: results/source_experts_v1/ldaps_pressure_tendency_gfs10_blend_524c5bb/
+```
+
 ## 13. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.
