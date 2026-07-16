@@ -721,8 +721,9 @@ variant  = LDAPS core + GFS 10m core + GEFS mean core
 - held-out delta 2022/2023/2024 `+0.000111/-0.001130/+0.001085`
 - group delta g1/g2/g3 `-0.000509/-0.000380/+0.001173`
 - standalone은 개선됐지만 final ensemble 증가는 noise 수준이며 유지 기준 `+0.001` 미달
-- raw 10m 직접입력은 baseline으로 승격하지 않고 보류
-- 10m 정보는 100-10m shear와 gust factor의 부모 원천정보로 유지하되 S2는 자동 실행하지 않음
+- 사용자 결정으로 raw 10m 직접입력을 source expert baseline에 채택
+- 이후 source ensemble 비교 기준은 `LDAPS core + GFS 10m core + GEFS mean core = 0.630926`
+- 10m 정보는 100-10m shear와 gust factor의 부모 원천정보로도 유지하되 S2는 자동 실행하지 않음
 - test prediction과 submission 없음
 
 산출물:
@@ -732,6 +733,53 @@ Duck: /home/yunjun0914/windforecast_runs/source_experts_v1/gfs_10m_s1_v1_00c54f8
 Local: results/source_experts_v1/gfs_10m_s1_v1_00c54f8/
 OOF:   gfs_10m_core_oof_predictions.csv
 Blend: results/source_experts_v1/gfs_10m_s1_blend_00c54f8/
+```
+
+### Phase 7 LDAPS 5m BL wind S1 ablation
+
+2026-07-16, code commit `d040483`. LDAPS core의 50m max/min 및 10m vector는 유지하고 5m boundary-layer `X/Y/speed` 3채널만 추가했다.
+
+```text
+heightAboveGround_5_XBLWS
+heightAboveGround_5_YBLWS
+wind_5m_speed
+```
+
+10-5m shear, 50-10m envelope shear, BLH interaction 등 S2 파생은 포함하지 않았다.
+
+Standalone:
+
+| Variant | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| LDAPS core | 0.622694 | 0.145303 | 0.390690 | - |
+| LDAPS core + 5m wind | 0.623029 | 0.147393 | 0.393450 | +0.000335 |
+
+Final source ensemble comparison은 채택된 GFS 10m baseline 위에서 수행했다.
+
+```text
+baseline = LDAPS core + GFS 10m core + GEFS mean core
+variant  = LDAPS 5m core + GFS 10m core + GEFS mean core
+```
+
+| Ensemble | Score | NMAE | FiCR | Delta |
+|---|---:|---:|---:|---:|
+| GFS 10m accepted baseline | 0.630926 | 0.137525 | 0.399378 | - |
+| LDAPS 5m replacement | 0.630987 | 0.138227 | 0.400201 | +0.000061 |
+
+- held-out delta 2022/2023/2024 `+0.005196/-0.001377/-0.000729`
+- group delta g1/g2/g3 `-0.000111/+0.003912/-0.003619`
+- g2 FiCR 개선을 g3 하락이 상쇄했고 연도별 방향도 불안정
+- final ensemble 이득은 noise 수준이며 유지 기준 `+0.001` 미달
+- raw 5m 직접입력은 사용자 결정 전 보류하며 baseline을 자동 갱신하지 않음
+- test prediction과 submission 없음
+
+산출물:
+
+```text
+Duck: /home/yunjun0914/windforecast_runs/source_experts_v1/ldaps_5m_s1_v1_d040483/
+Local: results/source_experts_v1/ldaps_5m_s1_v1_d040483/
+OOF:   ldaps_5m_core_oof_predictions.csv
+Blend: results/source_experts_v1/ldaps_5m_gfs_10m_s1_blend_d040483/
 ```
 
 ## 13. 계획 변경 규칙

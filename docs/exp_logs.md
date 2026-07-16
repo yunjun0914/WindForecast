@@ -3074,8 +3074,16 @@ nonzero differences > 1e-9 = 0
 - commit `00c54f8`, GFS core에 10m `u/v/speed` 3채널만 추가. shear/gust factor 등 S2 파생 없음.
 - standalone `0.610861 -> 0.612026` (`+0.001165`).
 - LDAPS/GEFS 고정, GFS만 10m variant로 교체한 동일 meta-year convex blend는 `0.630831 -> 0.630926` (`+0.000095`).
-- ensemble group delta g1/g2/g3 `-0.000509/-0.000380/+0.001173`; noise 수준이라 baseline으로 승격하지 않고 S2 부모정보로 보류. test/submission 없음.
+- ensemble group delta g1/g2/g3 `-0.000509/-0.000380/+0.001173`; noise 수준이지만 사용자 결정으로 source expert baseline에 채택. 새 ensemble 기준 `0.630926`. test/submission 없음.
 - OOF: ignored `results/source_experts_v1/gfs_10m_s1_v1_00c54f8/gfs_10m_core_oof_predictions.csv`.
+
+### 2026-07-16 - LDAPS 5m BL wind S1 ablation
+
+- commit `d040483`, LDAPS core에 5m `X/Y/speed` 3채널만 추가. shear/BLH 등 S2 파생 없음.
+- standalone `0.622694 -> 0.623029` (`+0.000335`).
+- 채택된 GFS 10m baseline 위에서 LDAPS만 5m variant로 교체한 source blend는 `0.630926 -> 0.630987` (`+0.000061`).
+- held-out delta `+0.005196/-0.001377/-0.000729`, group delta `-0.000111/+0.003912/-0.003619`. noise 수준으로 사용자 결정 전 보류. test/submission 없음.
+- OOF: ignored `results/source_experts_v1/ldaps_5m_s1_v1_d040483/ldaps_5m_core_oof_predictions.csv`.
 
 ### 2026-07-16 - GEFS ensemble spread TREE OOF v1
 
