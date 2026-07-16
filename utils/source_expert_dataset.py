@@ -262,6 +262,10 @@ LDAPS_DERIVED_FAMILY_CHANNELS = {
         "ldaps_snow_occurrence",
     ),
 }
+LDAPS_DERIVED_FAMILY_CHANNELS["density_spatial"] = (
+    *LDAPS_DERIVED_FAMILY_CHANNELS["density_power"],
+    *LDAPS_DERIVED_FAMILY_CHANNELS["spatial_flow"],
+)
 LDAPS_DERIVED_SOURCE_FAMILIES = {
     f"ldaps_{family}_derived_core": family
     for family in LDAPS_DERIVED_FAMILY_CHANNELS
@@ -291,6 +295,11 @@ LDAPS_DERIVED_RAW_CHANNELS = {
     ),
     "weather_regime": tuple(
         channel for channel in LDAPS_SURFACE_REGIME_CHANNELS if channel != "surface_0_h"
+    ),
+    "density_spatial": (
+        "heightAboveGround_2_t",
+        "heightAboveGround_2_q",
+        LDAPS_SURFACE_PRESSURE_COLUMN,
     ),
 }
 
@@ -899,6 +908,33 @@ def build_ldaps_derived_family_tensor(
     missing_columns = [column for column in required if column not in frame.columns]
     if missing_columns:
         raise ValueError(f"LDAPS {family} missing columns: {missing_columns}")
+
+    if family == "density_spatial":
+        density = build_ldaps_derived_family_tensor(frame, "density_power", labels=labels)
+        spatial = build_ldaps_derived_family_tensor(frame, "spatial_flow", labels=labels)
+        if not np.array_equal(density.forecast_times, spatial.forecast_times):
+            raise ValueError("LDAPS density/spatial forecast times differ")
+        core_channels = len(LDAPS_CORE_SPEC.output_channels)
+        tensor = replace(
+            density,
+            source="ldaps_density_spatial_derived_core",
+            values=np.concatenate(
+                [density.values, spatial.values[:, :, core_channels:]], axis=2
+            ).astype(np.float32),
+            missing_mask=np.concatenate(
+                [
+                    density.missing_mask,
+                    spatial.missing_mask[:, :, core_channels:],
+                ],
+                axis=2,
+            ),
+            channel_names=(
+                *LDAPS_CORE_SPEC.output_channels,
+                *LDAPS_DERIVED_FAMILY_CHANNELS["density_spatial"],
+            ),
+        )
+        tensor.validate()
+        return tensor
 
     extra_vectors = (
         (LDAPS_5M_CORE_SPEC.vectors[-1],) if family == "vertical_profile" else ()

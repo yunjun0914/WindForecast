@@ -376,6 +376,22 @@ class SourceExpertDatasetTest(unittest.TestCase):
         self.assertTrue(np.all(envelope_norm >= 0.0))
         self.assertTrue(np.isfinite(relative).all())
 
+    def test_ldaps_density_spatial_is_the_exact_24_channel_union(self):
+        combined = build_ldaps_derived_family_tensor(
+            make_ldaps_derived_frame("density_spatial"),
+            "density_spatial",
+        )
+        expected_additions = (
+            *LDAPS_DERIVED_FAMILY_CHANNELS["density_power"],
+            *LDAPS_DERIVED_FAMILY_CHANNELS["spatial_flow"],
+        )
+        self.assertEqual(combined.values.shape, (2, 24, 24, 4, 5))
+        self.assertEqual(
+            combined.channel_names,
+            (*LDAPS_CORE_SPEC.output_channels, *expected_additions),
+        )
+        self.assertEqual(len(set(combined.channel_names)), 24)
+
     def test_gfs_core_has_only_approved_channels(self):
         tensor = build_grid_source_core_tensor(make_grid_frame(GFS_CORE_SPEC), GFS_CORE_SPEC)
 
