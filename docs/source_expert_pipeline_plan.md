@@ -1200,13 +1200,13 @@ Density/Power:
 
 - held-out delta 2022/2023/2024 `+0.001087/+0.000971/+0.003094`
 - group delta g1/g2/g3 `+0.002746/+0.001747/+0.000292`
-- 세 연도와 세 group이 모두 개선되어 채택 후보
+- 세 연도와 세 group이 모두 개선되어 사용자 결정으로 별도 LDAPS expert 채택
 
 Spatial flow:
 
 - held-out delta 2022/2023/2024 `+0.002718/+0.001748/+0.001098`
 - group delta g1/g2/g3 `+0.000855/+0.002659/+0.001776`
-- 세 연도와 세 group이 모두 개선되고 pooled delta가 가장 커 채택 후보
+- 세 연도와 세 group이 모두 개선되고 pooled delta가 가장 커 사용자 결정으로 별도 LDAPS expert 채택
 
 나머지:
 
@@ -1214,7 +1214,8 @@ Spatial flow:
 - Terrain과 Thermodynamic은 특정 연도/group 개선이 있으나 pooled는 각각 `-0.000405/-0.000384`
 - Envelope, PBL, Temporal, Weather는 final blend가 명확히 하락
 - 9개 OOF와 9개 blend prediction은 각각 69,747행, duplicate 0, non-finite 0
-- Density와 Spatial 합본은 별도 승인 전 실행하지 않음. test prediction과 submission 없음
+- Density와 Spatial은 각각 채택. 후속 Phase 15에서 사용자 승인으로 24ch 합본을 별도 검증
+- test prediction과 submission 없음
 
 산출물:
 
@@ -1224,7 +1225,53 @@ Local OOF: results/source_experts_v1/ldaps_derived_families_v1_84a852a/
 Blend:     results/source_experts_v1/ldaps_<family>_derived_blend_84a852a/
 ```
 
-## 15. 계획 변경 규칙
+### Phase 15 LDAPS Density+Spatial 24ch feature union
+
+2026-07-16, code commit `5515d6e`. 사용자 결정으로 채택한 Density/Power와 Spatial Flow를 한 LDAPS encoder에 결합했다.
+
+```text
+LDAPS core       9ch
+Density/Power   +6ch
+Spatial Flow    +9ch
+Combined total  24ch
+```
+
+- 두 family 사이 파생채널 중복 0
+- T/q/surface pressure 같은 부모 raw는 출력에 다시 넣지 않음
+- 단독 family builder가 만든 파생 tensor를 그대로 union하여 수식 변화 없음
+- 추가 family, subset, 파라미터 변경 없음
+
+| LDAPS expert | Standalone | Final source blend | Delta vs current baseline |
+|---|---:|---:|---:|
+| LDAPS core | 0.622694 | 0.631735 | - |
+| Density/Power | 0.623169 | 0.633330 | +0.001595 |
+| Spatial Flow | 0.623164 | 0.633498 | +0.001763 |
+| Density+Spatial 24ch | 0.622928 | 0.631966 | +0.000231 |
+
+Combined final metric:
+
+```text
+Score = 0.631966
+NMAE = 0.137248
+FiCR  = 0.401180
+```
+
+- held-out delta vs core baseline 2022/2023/2024 `+0.001483/-0.001224/+0.001616`
+- group delta g1/g2/g3 `-0.000570/+0.003258/-0.001995`
+- 두 family를 한 encoder에 넣으면 g2는 크게 개선되지만 g1/g3와 2023에서 상쇄
+- combined는 baseline보다 소폭 높지만 Density 단독보다 `-0.001364`, Spatial 단독보다 `-0.001532`
+- Density와 Spatial은 각각 별도 LDAPS expert로 채택 유지. 24ch combined는 미채택
+- OOF와 blend prediction은 각각 69,747행, duplicate 0, non-finite 0
+- test prediction과 submission 없음
+
+산출물:
+
+```text
+OOF:   results/source_experts_v1/ldaps_density_spatial_v1_5515d6e/
+Blend: results/source_experts_v1/ldaps_density_spatial_blend_5515d6e/
+```
+
+## 16. 계획 변경 규칙
 
 다음 단계로 자동 진행하지 않는다.
 

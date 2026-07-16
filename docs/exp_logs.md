@@ -3152,5 +3152,13 @@ nonzero differences > 1e-9 = 0
 - commit `84a852a`, LDAPS core에 9개 파생 family를 각각 독립 추가하고 Bear에서 9개 full outer-year OOF를 병렬 실행. `50m max-speed - min-speed`는 26.6% 음수라 component midpoint와 component range norm으로 수정해 사용.
 - standalone delta: Envelope `-0.001659`, Vertical `+0.001322`, Density `+0.000476`, PBL `-0.001037`, Spatial `+0.000471`, Terrain `-0.000591`, Temporal `-0.004417`, Thermo `-0.001275`, Weather `-0.002830`.
 - current GFS combined/GEFS mean 고정 source blend delta: Envelope `-0.003649`, Vertical `-0.000331`, Density `+0.001595`, PBL `-0.001210`, Spatial `+0.001763`, Terrain `-0.000405`, Temporal `-0.003677`, Thermo `-0.000384`, Weather `-0.004105`.
-- Density와 Spatial은 세 연도·세 group 모두 개선해 채택 후보. 합본은 미실험. 나머지 direct family는 미채택.
+- Density와 Spatial은 세 연도·세 group 모두 개선해 사용자 결정으로 각각 채택. 나머지 direct family는 미채택.
 - 18개 prediction 파일 모두 69,747행, duplicate/non-finite 0. test/submission 없음. OOF: ignored `results/source_experts_v1/ldaps_derived_families_v1_84a852a/`.
+
+### 2026-07-16 - LDAPS Density+Spatial feature union
+
+- commit `5515d6e`, core 9ch + Density 6ch + Spatial 9ch의 정확한 24ch union. 부모 raw 재추가와 중복 파생채널 없음.
+- standalone `0.622928`, final source blend `0.631966`로 core baseline 대비 `+0.000231`.
+- held-out delta `+0.001483/-0.001224/+0.001616`, group delta `-0.000570/+0.003258/-0.001995`. g2 개선이 g1/g3와 2023 하락으로 상쇄.
+- Density `0.633330`, Spatial `0.633498`보다 각각 `-0.001364/-0.001532` 낮아 combined는 미채택. 두 단독 experts는 채택 유지.
+- OOF/blend 69,747행, duplicate/non-finite 0. test/submission 없음. OOF: ignored `results/source_experts_v1/ldaps_density_spatial_v1_5515d6e/`.
