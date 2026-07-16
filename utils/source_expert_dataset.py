@@ -21,6 +21,7 @@ LDAPS_HUB_OVER_BLH_CHANNEL = "ldaps_hub_over_blh"
 LDAPS_SURFACE_PRESSURE_COLUMN = "surface_0_sp"
 LDAPS_PRESSURE_TENDENCY_CHANNEL = "ldaps_pressure_tendency_3h"
 LDAPS_PRESSURE_TENDENCY_HOURS = 3
+LDAPS_MSLP_COLUMN = "meanSea_0_prmsl"
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,14 @@ LDAPS_PRESSURE_TENDENCY_SPEC = GridSourceSpec(
     layout=LDAPS_CORE_SPEC.layout,
     vectors=LDAPS_CORE_SPEC.vectors,
     scalar_channels=(LDAPS_PRESSURE_TENDENCY_CHANNEL,),
+)
+
+
+LDAPS_MSLP_SPEC = GridSourceSpec(
+    name="ldaps_mslp_core",
+    layout=LDAPS_CORE_SPEC.layout,
+    vectors=LDAPS_CORE_SPEC.vectors,
+    scalar_channels=(LDAPS_MSLP_COLUMN,),
 )
 
 

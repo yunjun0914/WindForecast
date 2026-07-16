@@ -17,6 +17,8 @@ from utils.source_expert_dataset import (
     LDAPS_BLH_FLOOR_M,
     LDAPS_BLH_RATIO_SPEC,
     LDAPS_HUB_OVER_BLH_CHANNEL,
+    LDAPS_MSLP_COLUMN,
+    LDAPS_MSLP_SPEC,
     LDAPS_PRESSURE_TENDENCY_CHANNEL,
     LDAPS_PRESSURE_TENDENCY_SPEC,
     LDAPS_SURFACE_PRESSURE_COLUMN,
@@ -234,6 +236,19 @@ class SourceExpertDatasetTest(unittest.TestCase):
         tendency_index = tensor.channel_names.index(LDAPS_PRESSURE_TENDENCY_CHANNEL)
         tendency = tensor.values[:, :, tendency_index][:, :, tensor.spatial_mask]
         self.assertTrue(np.allclose(tendency, 1.0))
+
+    def test_ldaps_mslp_adds_exactly_one_raw_scalar_channel(self):
+        tensor = build_grid_source_core_tensor(
+            make_grid_frame(LDAPS_MSLP_SPEC),
+            LDAPS_MSLP_SPEC,
+        )
+
+        self.assertEqual(tensor.values.shape, (2, 24, 10, 4, 5))
+        self.assertEqual(tensor.channel_names, LDAPS_MSLP_SPEC.output_channels)
+        self.assertEqual(
+            set(tensor.channel_names) - set(LDAPS_CORE_SPEC.output_channels),
+            {LDAPS_MSLP_COLUMN},
+        )
 
     def test_gfs_core_has_only_approved_channels(self):
         tensor = build_grid_source_core_tensor(make_grid_frame(GFS_CORE_SPEC), GFS_CORE_SPEC)

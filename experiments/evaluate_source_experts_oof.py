@@ -32,6 +32,7 @@ from utils.source_expert_dataset import (
     GFS_SURFACE_PRESSURE_SPEC,
     LDAPS_CORE_SPEC,
     LDAPS_5M_CORE_SPEC,
+    LDAPS_MSLP_SPEC,
     LDAPS_SURFACE_PRESSURE_SPEC,
     GEFSIssueTensor,
     SourceIssueTensor,
@@ -61,6 +62,7 @@ SOURCE_NAMES = (
     "ldaps_5m_core",
     "ldaps_blh_ratio_core",
     "ldaps_pressure_tendency_core",
+    "ldaps_mslp_core",
     "ldaps_core_sp",
     "gfs_core_sp",
 )
@@ -73,6 +75,7 @@ PREDICTION_FILES = {
     "ldaps_5m_core": "ldaps_5m_core_oof_predictions.csv",
     "ldaps_blh_ratio_core": "ldaps_blh_ratio_core_oof_predictions.csv",
     "ldaps_pressure_tendency_core": "ldaps_pressure_tendency_core_oof_predictions.csv",
+    "ldaps_mslp_core": "ldaps_mslp_core_oof_predictions.csv",
     "ldaps_core_sp": "ldaps_core_sp_oof_predictions.csv",
     "gfs_core_sp": "gfs_core_sp_oof_predictions.csv",
 }
@@ -228,6 +231,16 @@ def load_source_bundle(
                 args.ldaps_train,
                 ldaps_pressure_tendency_required_columns(),
             ),
+            labels=labels,
+        )
+        bundle = SourceBundle(source, (tensor,))
+    elif source == "ldaps_mslp_core":
+        tensor = build_grid_source_core_tensor(
+            read_source_csv(
+                args.ldaps_train,
+                source_required_columns(LDAPS_MSLP_SPEC),
+            ),
+            LDAPS_MSLP_SPEC,
             labels=labels,
         )
         bundle = SourceBundle(source, (tensor,))
