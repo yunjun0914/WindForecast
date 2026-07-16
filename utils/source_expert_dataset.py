@@ -137,6 +137,45 @@ LDAPS_MSLP_SPEC = GridSourceSpec(
 )
 
 
+LDAPS_THERMO_PBL_CHANNELS = (
+    "heightAboveGround_2_t",
+    "heightAboveGround_2_dpt",
+    "heightAboveGround_2_r",
+    "heightAboveGround_2_q",
+    "etc_0_blh",
+)
+LDAPS_THERMO_PBL_SPEC = GridSourceSpec(
+    name="ldaps_thermo_pbl_core",
+    layout=LDAPS_CORE_SPEC.layout,
+    vectors=LDAPS_CORE_SPEC.vectors,
+    scalar_channels=LDAPS_THERMO_PBL_CHANNELS,
+)
+
+
+LDAPS_SURFACE_REGIME_CHANNELS = (
+    "surface_0_NDNSW",
+    "surface_0_NDNLW",
+    "heightAboveGround_2_SWDIR",
+    "heightAboveGround_2_SWDIF",
+    "etc_0_hcc",
+    "etc_0_mcc",
+    "etc_0_lcc",
+    "etc_0_VLCDC",
+    "surface_0_avg_lsprate",
+    "surface_0_lssrate",
+    "surface_0_ncpcp",
+    "surface_0_snol",
+    "surface_0_SNOM",
+    "surface_0_h",
+)
+LDAPS_SURFACE_REGIME_SPEC = GridSourceSpec(
+    name="ldaps_surface_regime_core",
+    layout=LDAPS_CORE_SPEC.layout,
+    vectors=LDAPS_CORE_SPEC.vectors,
+    scalar_channels=LDAPS_SURFACE_REGIME_CHANNELS,
+)
+
+
 GFS_CORE_SPEC = GridSourceSpec(
     name="gfs_core",
     layout={grid_id: ((grid_id - 1) // 3, (grid_id - 1) % 3) for grid_id in range(1, 10)},

@@ -33,7 +33,9 @@ from utils.source_expert_dataset import (
     LDAPS_CORE_SPEC,
     LDAPS_5M_CORE_SPEC,
     LDAPS_MSLP_SPEC,
+    LDAPS_SURFACE_REGIME_SPEC,
     LDAPS_SURFACE_PRESSURE_SPEC,
+    LDAPS_THERMO_PBL_SPEC,
     GEFSIssueTensor,
     SourceIssueTensor,
     apply_gefs_publication_fallback,
@@ -63,6 +65,8 @@ SOURCE_NAMES = (
     "ldaps_blh_ratio_core",
     "ldaps_pressure_tendency_core",
     "ldaps_mslp_core",
+    "ldaps_thermo_pbl_core",
+    "ldaps_surface_regime_core",
     "ldaps_core_sp",
     "gfs_core_sp",
 )
@@ -76,6 +80,8 @@ PREDICTION_FILES = {
     "ldaps_blh_ratio_core": "ldaps_blh_ratio_core_oof_predictions.csv",
     "ldaps_pressure_tendency_core": "ldaps_pressure_tendency_core_oof_predictions.csv",
     "ldaps_mslp_core": "ldaps_mslp_core_oof_predictions.csv",
+    "ldaps_thermo_pbl_core": "ldaps_thermo_pbl_core_oof_predictions.csv",
+    "ldaps_surface_regime_core": "ldaps_surface_regime_core_oof_predictions.csv",
     "ldaps_core_sp": "ldaps_core_sp_oof_predictions.csv",
     "gfs_core_sp": "gfs_core_sp_oof_predictions.csv",
 }
@@ -241,6 +247,26 @@ def load_source_bundle(
                 source_required_columns(LDAPS_MSLP_SPEC),
             ),
             LDAPS_MSLP_SPEC,
+            labels=labels,
+        )
+        bundle = SourceBundle(source, (tensor,))
+    elif source == "ldaps_thermo_pbl_core":
+        tensor = build_grid_source_core_tensor(
+            read_source_csv(
+                args.ldaps_train,
+                source_required_columns(LDAPS_THERMO_PBL_SPEC),
+            ),
+            LDAPS_THERMO_PBL_SPEC,
+            labels=labels,
+        )
+        bundle = SourceBundle(source, (tensor,))
+    elif source == "ldaps_surface_regime_core":
+        tensor = build_grid_source_core_tensor(
+            read_source_csv(
+                args.ldaps_train,
+                source_required_columns(LDAPS_SURFACE_REGIME_SPEC),
+            ),
+            LDAPS_SURFACE_REGIME_SPEC,
             labels=labels,
         )
         bundle = SourceBundle(source, (tensor,))

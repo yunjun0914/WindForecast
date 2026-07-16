@@ -23,6 +23,10 @@ from utils.source_expert_dataset import (
     LDAPS_PRESSURE_TENDENCY_SPEC,
     LDAPS_SURFACE_PRESSURE_COLUMN,
     LDAPS_SURFACE_PRESSURE_SPEC,
+    LDAPS_SURFACE_REGIME_CHANNELS,
+    LDAPS_SURFACE_REGIME_SPEC,
+    LDAPS_THERMO_PBL_CHANNELS,
+    LDAPS_THERMO_PBL_SPEC,
     TURBINE_HUB_HEIGHT_M,
     apply_gefs_publication_fallback,
     build_gefs_mean_core_tensor,
@@ -249,6 +253,28 @@ class SourceExpertDatasetTest(unittest.TestCase):
             set(tensor.channel_names) - set(LDAPS_CORE_SPEC.output_channels),
             {LDAPS_MSLP_COLUMN},
         )
+
+    def test_ldaps_raw_families_add_only_the_audited_scalar_channels(self):
+        thermo = build_grid_source_core_tensor(
+            make_grid_frame(LDAPS_THERMO_PBL_SPEC),
+            LDAPS_THERMO_PBL_SPEC,
+        )
+        surface = build_grid_source_core_tensor(
+            make_grid_frame(LDAPS_SURFACE_REGIME_SPEC),
+            LDAPS_SURFACE_REGIME_SPEC,
+        )
+
+        self.assertEqual(thermo.values.shape, (2, 24, 14, 4, 5))
+        self.assertEqual(surface.values.shape, (2, 24, 23, 4, 5))
+        self.assertEqual(
+            set(thermo.channel_names) - set(LDAPS_CORE_SPEC.output_channels),
+            set(LDAPS_THERMO_PBL_CHANNELS),
+        )
+        self.assertEqual(
+            set(surface.channel_names) - set(LDAPS_CORE_SPEC.output_channels),
+            set(LDAPS_SURFACE_REGIME_CHANNELS),
+        )
+        self.assertNotIn("surface_0_lsm", surface.channel_names)
 
     def test_gfs_core_has_only_approved_channels(self):
         tensor = build_grid_source_core_tensor(make_grid_frame(GFS_CORE_SPEC), GFS_CORE_SPEC)
