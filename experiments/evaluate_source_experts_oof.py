@@ -34,6 +34,8 @@ from utils.source_expert_dataset import (
     GFS_THERMO_SYNOPTIC_SPEC,
     GFS_VERTICAL_THERMO_SPEC,
     GFS_VERTICAL_WIND_SPEC,
+    GEFS_NEAR_SPREAD_VECTORS,
+    GEFS_UPPER_SPREAD_VECTORS,
     LDAPS_CORE_SPEC,
     LDAPS_5M_CORE_SPEC,
     LDAPS_MSLP_SPEC,
@@ -44,7 +46,10 @@ from utils.source_expert_dataset import (
     SourceIssueTensor,
     apply_gefs_publication_fallback,
     build_gefs_mean_core_tensor,
+    build_gefs_mean700_core_tensor,
+    build_gefs_near_spread_core_tensor,
     build_gefs_spread_core_tensor,
+    build_gefs_upper_spread_core_tensor,
     build_grid_source_core_tensor,
     build_ldaps_blh_ratio_tensor,
     build_ldaps_pressure_tendency_tensor,
@@ -64,6 +69,9 @@ CORE_SOURCE_NAMES = ("ldaps_core", "gfs_core", "gefs_mean_core")
 SOURCE_NAMES = (
     *CORE_SOURCE_NAMES,
     "gefs_spread_core",
+    "gefs_mean700_core",
+    "gefs_near_spread_core",
+    "gefs_upper_spread_core",
     "gfs_10m_core",
     "gfs_vertical_wind_core",
     "gfs_thermo_synoptic_core",
@@ -83,6 +91,9 @@ PREDICTION_FILES = {
     "gfs_core": "gfs_core_oof_predictions.csv",
     "gefs_mean_core": "gefs_mean_core_oof_predictions.csv",
     "gefs_spread_core": "gefs_spread_core_oof_predictions.csv",
+    "gefs_mean700_core": "gefs_mean700_core_oof_predictions.csv",
+    "gefs_near_spread_core": "gefs_near_spread_core_oof_predictions.csv",
+    "gefs_upper_spread_core": "gefs_upper_spread_core_oof_predictions.csv",
     "gfs_10m_core": "gfs_10m_core_oof_predictions.csv",
     "gfs_vertical_wind_core": "gfs_vertical_wind_core_oof_predictions.csv",
     "gfs_thermo_synoptic_core": "gfs_thermo_synoptic_core_oof_predictions.csv",
@@ -359,20 +370,38 @@ def load_source_bundle(
             labels=labels,
         )
         bundle = SourceBundle(source, (tensor,))
-    elif source in ("gefs_mean_core", "gefs_spread_core"):
+    elif source in (
+        "gefs_mean_core",
+        "gefs_spread_core",
+        "gefs_mean700_core",
+        "gefs_near_spread_core",
+        "gefs_upper_spread_core",
+    ):
         include_spread = source == "gefs_spread_core"
+        include_700 = source == "gefs_mean700_core"
+        spread_vectors = {
+            "gefs_near_spread_core": GEFS_NEAR_SPREAD_VECTORS,
+            "gefs_upper_spread_core": GEFS_UPPER_SPREAD_VECTORS,
+        }.get(source, ())
+        include_gust_spread = source == "gefs_near_spread_core"
         pressure, gust = load_gefs_core_frames(
             args.gefs_root,
             include_spread=include_spread,
+            include_700=include_700,
+            spread_vectors=spread_vectors,
+            include_gust_spread=include_gust_spread,
         )
-        builder = (
-            build_gefs_spread_core_tensor
-            if include_spread
-            else build_gefs_mean_core_tensor
-        )
+        builders = {
+            "gefs_mean_core": build_gefs_mean_core_tensor,
+            "gefs_spread_core": build_gefs_spread_core_tensor,
+            "gefs_mean700_core": build_gefs_mean700_core_tensor,
+            "gefs_near_spread_core": build_gefs_near_spread_core_tensor,
+            "gefs_upper_spread_core": build_gefs_upper_spread_core_tensor,
+        }
+        builder = builders[source]
         gefs_all = builder(pressure, gust, labels=labels)
         publication = gefs_publication_audit(args.gefs_root, kind="geavg")
-        if include_spread:
+        if include_spread or spread_vectors or include_gust_spread:
             spread_publication = gefs_publication_audit(
                 args.gefs_root,
                 kind="gespr",
@@ -501,7 +530,7 @@ def model_configuration(
     bundle: SourceBundle,
     config: ExperimentConfig,
 ) -> SourceExpertTCN:
-    if bundle.name in ("gefs_mean_core", "gefs_spread_core"):
+    if bundle.name.startswith("gefs_"):
         hidden_sizes = [64, 16]
         embedding_sizes = [64, 16]
     else:

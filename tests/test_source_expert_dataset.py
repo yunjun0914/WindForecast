@@ -38,7 +38,10 @@ from utils.source_expert_dataset import (
     TURBINE_HUB_HEIGHT_M,
     apply_gefs_publication_fallback,
     build_gefs_mean_core_tensor,
+    build_gefs_mean700_core_tensor,
+    build_gefs_near_spread_core_tensor,
     build_gefs_spread_core_tensor,
+    build_gefs_upper_spread_core_tensor,
     build_grid_source_core_tensor,
     build_ldaps_blh_ratio_tensor,
     build_ldaps_pressure_tendency_tensor,
@@ -87,6 +90,8 @@ def make_gefs_frames(run_count=2):
         "v925_mean",
         "u850_mean",
         "v850_mean",
+        "u700_mean",
+        "v700_mean",
     )
     pressure_spread_channels = (
         "u10m_sprd",
@@ -95,6 +100,8 @@ def make_gefs_frames(run_count=2):
         "v925_sprd",
         "u850_sprd",
         "v850_sprd",
+        "u700_sprd",
+        "v700_sprd",
     )
     for run_index in range(run_count):
         run_date = pd.Timestamp("2021-12-30") + pd.Timedelta(days=run_index)
@@ -452,6 +459,65 @@ class SourceExpertDatasetTest(unittest.TestCase):
         )
         self.assertFalse(any("relative" in name for name in spread.pressure.channel_names))
         self.assertFalse(any("speed" in name for name in spread.pressure.channel_names[6:12]))
+
+    def test_gefs_mean700_adds_only_the_700_mean_vector_and_speed(self):
+        pressure, gust = make_gefs_frames()
+        mean = build_gefs_mean_core_tensor(pressure, gust)
+        mean700 = build_gefs_mean700_core_tensor(pressure, gust)
+
+        self.assertEqual(mean700.pressure.values.shape, (2, 24, 12, 7, 7))
+        self.assertEqual(mean700.gust.values.shape, (2, 24, 1, 9, 9))
+        self.assertEqual(
+            set(mean700.pressure.channel_names) - set(mean.pressure.channel_names),
+            {"u700_mean", "v700_mean", "wind_700_speed"},
+        )
+
+    def test_gefs_near_spread_keeps_only_surface_uncertainty_family(self):
+        pressure, gust = make_gefs_frames()
+        mean = build_gefs_mean_core_tensor(pressure, gust)
+        near = build_gefs_near_spread_core_tensor(pressure, gust)
+
+        self.assertEqual(near.pressure.values.shape, (2, 24, 15, 7, 7))
+        self.assertEqual(near.gust.values.shape, (2, 24, 2, 9, 9))
+        self.assertEqual(
+            set(near.pressure.channel_names) - set(mean.pressure.channel_names),
+            {
+                "u10m_sprd",
+                "v10m_sprd",
+                "u925_sprd",
+                "v925_sprd",
+                "ensemble_spread_10m_speed",
+                "ensemble_spread_925_speed",
+            },
+        )
+        self.assertEqual(
+            set(near.gust.channel_names) - set(mean.gust.channel_names),
+            {"gust_sprd"},
+        )
+        self.assertNotIn("u850_sprd", near.pressure.channel_names)
+        self.assertNotIn("u700_sprd", near.pressure.channel_names)
+
+    def test_gefs_upper_spread_keeps_only_850_and_700_uncertainty(self):
+        pressure, gust = make_gefs_frames()
+        mean = build_gefs_mean_core_tensor(pressure, gust)
+        upper = build_gefs_upper_spread_core_tensor(pressure, gust)
+
+        self.assertEqual(upper.pressure.values.shape, (2, 24, 15, 7, 7))
+        self.assertEqual(upper.gust.values.shape, (2, 24, 1, 9, 9))
+        self.assertEqual(
+            set(upper.pressure.channel_names) - set(mean.pressure.channel_names),
+            {
+                "u850_sprd",
+                "v850_sprd",
+                "u700_sprd",
+                "v700_sprd",
+                "ensemble_spread_850_speed",
+                "ensemble_spread_700_speed",
+            },
+        )
+        self.assertNotIn("u10m_sprd", upper.pressure.channel_names)
+        self.assertNotIn("u925_sprd", upper.pressure.channel_names)
+        self.assertNotIn("gust_sprd", upper.gust.channel_names)
 
     def test_gefs_publication_fallback_copies_prior_safe_issue(self):
         pressure, gust = make_gefs_frames()

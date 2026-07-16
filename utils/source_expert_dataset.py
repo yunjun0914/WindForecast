@@ -319,6 +319,14 @@ GEFS_PRESSURE_SPREAD_CHANNELS = (
     "u850_sprd",
     "v850_sprd",
 )
+GEFS_NEAR_SPREAD_VECTORS = (
+    VectorChannels("ensemble_spread_10m", "u10m_sprd", "v10m_sprd"),
+    VectorChannels("ensemble_spread_925", "u925_sprd", "v925_sprd"),
+)
+GEFS_UPPER_SPREAD_VECTORS = (
+    VectorChannels("ensemble_spread_850", "u850_sprd", "v850_sprd"),
+    VectorChannels("ensemble_spread_700", "u700_sprd", "v700_sprd"),
+)
 GEFS_GUST_MEAN_CHANNELS = ("gust_mean",)
 GEFS_GUST_SPREAD_CHANNELS = ("gust_sprd",)
 
@@ -791,16 +799,30 @@ def _build_gefs_core_tensor(
     labels: pd.DataFrame | None = None,
     include_700: bool = False,
     include_spread: bool = False,
+    spread_vectors: tuple[VectorChannels, ...] = (),
+    include_gust_spread: bool = False,
+    variant: str | None = None,
 ) -> GEFSIssueTensor:
-    vectors = (
+    mean_vectors = (
         *GEFS_PRESSURE_MEAN_VECTORS,
         *((GEFS_PRESSURE_700_VECTOR,) if include_700 else ()),
     )
-    pressure_raw = (
-        *(channel for vector in vectors for channel in (vector.u, vector.v)),
-        *(GEFS_PRESSURE_SPREAD_CHANNELS if include_spread else ()),
+    vectors = (*mean_vectors, *spread_vectors)
+    selected_spread_channels = (
+        GEFS_PRESSURE_SPREAD_CHANNELS
+        if include_spread
+        else tuple(
+            channel
+            for vector in spread_vectors
+            for channel in (vector.u, vector.v)
+        )
     )
-    variant = "spread_core" if include_spread else "mean_core"
+    pressure_raw = (
+        *(channel for vector in mean_vectors for channel in (vector.u, vector.v)),
+        *selected_spread_channels,
+    )
+    if variant is None:
+        variant = "spread_core" if include_spread else "mean_core"
     pressure_tensor = _gefs_component_tensor(
         pressure,
         source=f"gefs_pressure_{variant}",
@@ -811,7 +833,11 @@ def _build_gefs_core_tensor(
     )
     gust_raw = (
         *GEFS_GUST_MEAN_CHANNELS,
-        *(GEFS_GUST_SPREAD_CHANNELS if include_spread else ()),
+        *(
+            GEFS_GUST_SPREAD_CHANNELS
+            if include_spread or include_gust_spread
+            else ()
+        ),
     )
     gust_tensor = _gefs_component_tensor(
         gust,
@@ -852,6 +878,49 @@ def build_gefs_spread_core_tensor(
         labels=labels,
         include_700=False,
         include_spread=True,
+    )
+
+
+def build_gefs_mean700_core_tensor(
+    pressure: pd.DataFrame,
+    gust: pd.DataFrame,
+    labels: pd.DataFrame | None = None,
+) -> GEFSIssueTensor:
+    return _build_gefs_core_tensor(
+        pressure,
+        gust,
+        labels=labels,
+        include_700=True,
+        variant="mean700_core",
+    )
+
+
+def build_gefs_near_spread_core_tensor(
+    pressure: pd.DataFrame,
+    gust: pd.DataFrame,
+    labels: pd.DataFrame | None = None,
+) -> GEFSIssueTensor:
+    return _build_gefs_core_tensor(
+        pressure,
+        gust,
+        labels=labels,
+        spread_vectors=GEFS_NEAR_SPREAD_VECTORS,
+        include_gust_spread=True,
+        variant="near_spread_core",
+    )
+
+
+def build_gefs_upper_spread_core_tensor(
+    pressure: pd.DataFrame,
+    gust: pd.DataFrame,
+    labels: pd.DataFrame | None = None,
+) -> GEFSIssueTensor:
+    return _build_gefs_core_tensor(
+        pressure,
+        gust,
+        labels=labels,
+        spread_vectors=GEFS_UPPER_SPREAD_VECTORS,
+        variant="upper_spread_core",
     )
 
 
@@ -1044,28 +1113,48 @@ def transform_source_channels(
 def load_gefs_core_frames(
     root: Path | str,
     include_spread: bool = False,
+    include_700: bool = False,
+    spread_vectors: tuple[VectorChannels, ...] = (),
+    include_gust_spread: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     root = Path(root)
     pressure_paths = sorted((root / "parquet").glob("gefs_pa_*.parquet"))
     gust_paths = sorted((root / "parquet").glob("gefs_gust_*.parquet"))
     if not pressure_paths or not gust_paths:
         raise FileNotFoundError(f"GEFS parquet files not found under {root}")
-    pressure_columns = (
+    mean_vectors = (
+        *GEFS_PRESSURE_MEAN_VECTORS,
+        *((GEFS_PRESSURE_700_VECTOR,) if include_700 else ()),
+    )
+    selected_spread_channels = (
+        GEFS_PRESSURE_SPREAD_CHANNELS
+        if include_spread
+        else tuple(
+            channel
+            for vector in spread_vectors
+            for channel in (vector.u, vector.v)
+        )
+    )
+    pressure_columns = tuple(dict.fromkeys((
         "run_date",
         "fhour",
         "lat",
         "lon",
-        *(channel for vector in GEFS_PRESSURE_MEAN_VECTORS for channel in (vector.u, vector.v)),
-        *(GEFS_PRESSURE_SPREAD_CHANNELS if include_spread else ()),
-    )
-    gust_columns = (
+        *(channel for vector in mean_vectors for channel in (vector.u, vector.v)),
+        *selected_spread_channels,
+    )))
+    gust_columns = tuple(dict.fromkeys((
         "run_date",
         "fhour",
         "lat",
         "lon",
         *GEFS_GUST_MEAN_CHANNELS,
-        *(GEFS_GUST_SPREAD_CHANNELS if include_spread else ()),
-    )
+        *(
+            GEFS_GUST_SPREAD_CHANNELS
+            if include_spread or include_gust_spread
+            else ()
+        ),
+    )))
     pressure = pd.concat(
         [pd.read_parquet(path, columns=list(pressure_columns)) for path in pressure_paths],
         ignore_index=True,
