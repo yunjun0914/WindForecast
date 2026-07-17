@@ -46,6 +46,10 @@ from utils.per_turbine_raw_source_features import (
 from utils.per_turbine_teacher import TEACHER_FEATURE_COLS, get_or_build_teacher_cache
 from utils.per_turbine_terrain import add_per_turbine_terrain_features, terrain_feature_columns
 from utils.power_curve import GROUP_TURBINE_PREFIXES
+from utils.temporal_representation import (
+    REPRESENTATIONS,
+    apply_issue_temporal_representation,
+)
 
 
 YEARS = [2022, 2023, 2024]
@@ -129,6 +133,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--drop-wind-threshold", type=float, default=8.0)
     parser.add_argument("--drop-power-ratio-threshold", type=float, default=0.10)
     parser.add_argument("--target-share-alpha", type=float, default=1.0)
+    parser.add_argument(
+        "--point-loss",
+        choices=["weighted_l1", "ficr_tube_hinge"],
+        default="weighted_l1",
+    )
+    parser.add_argument(
+        "--temporal-representation",
+        choices=REPRESENTATIONS,
+        default="original",
+    )
+    parser.add_argument("--temporal-representation-window", type=int, default=7)
     return parser.parse_args()
 
 
@@ -274,9 +289,11 @@ def train_turbine_fold(
     gc.collect()
 
     y_train_norm = np.clip(y_train / turbine_capacity, 0, 1).astype(np.float32)
-    weights = (
-        0.5 + np.sqrt(np.clip(official_train / group_capacity, 0, 1))
-    ).astype(np.float32)
+    official_output_ratio = np.clip(official_train / group_capacity, 0, 1)
+    if args.point_loss == "weighted_l1":
+        weights = (0.5 + np.sqrt(official_output_ratio)).astype(np.float32)
+    else:
+        weights = official_output_ratio.astype(np.float32)
     dataset = TensorDataset(
         torch.from_numpy(x_train_scaled),
         torch.from_numpy(y_train_norm),
@@ -311,7 +328,12 @@ def train_turbine_fold(
             wb = wb.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
             pred = model(xb)
-            loss = (torch.abs(pred - yb) * wb).mean()
+            error = torch.abs(pred - yb)
+            if args.point_loss == "weighted_l1":
+                loss = (error * wb).mean()
+            else:
+                tube_hinge = torch.relu(error - 0.06) + 3.0 * torch.relu(error - 0.08)
+                loss = (tube_hinge * wb).mean()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optimizer.step()
@@ -389,6 +411,7 @@ def train_turbine_fold(
         ),
         "n_val_all": len(y_val_all),
         "n_val_target": int(val_eval_keep.sum()),
+        "point_loss": args.point_loss,
     }
     del model, optimizer, loader, dataset, x_train_scaled, x_val_scaled
     gc.collect()
@@ -746,7 +769,10 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(
         f"device={device} window={args.window} feature_variant={args.feature_variant} "
-        f"weather_source={args.weather_source} epochs={args.epochs} patience={args.patience}",
+        f"weather_source={args.weather_source} point_loss={args.point_loss} "
+        f"temporal_representation={args.temporal_representation} "
+        f"representation_window={args.temporal_representation_window} "
+        f"epochs={args.epochs} patience={args.patience}",
         flush=True,
     )
 
@@ -893,10 +919,18 @@ def main() -> None:
                 feature_cols = list(TEACHER_FEATURE_COLS)
             else:
                 feature_cols = [*weather_cols, *TEACHER_FEATURE_COLS]
+            table, temporally_aggregated_cols = apply_issue_temporal_representation(
+                table,
+                feature_cols,
+                representation=args.temporal_representation,
+                window=args.temporal_representation_window,
+            )
             print(
                 f"\n{group} pred_year={pred_year} train={train_years} "
                 f"variant={args.feature_variant} source={args.weather_source} "
-                f"features={len(feature_cols)} share_alpha={args.target_share_alpha:.2f}",
+                f"features={len(feature_cols)} aggregated={len(temporally_aggregated_cols)} "
+                f"representation={args.temporal_representation} "
+                f"share_alpha={args.target_share_alpha:.2f}",
                 flush=True,
             )
 
@@ -949,6 +983,9 @@ def main() -> None:
                         "window": args.window,
                         "n_features": len(feature_cols),
                         "weather_source": args.weather_source,
+                        "temporal_representation": args.temporal_representation,
+                        "temporal_representation_window": args.temporal_representation_window,
+                        "n_temporally_aggregated": len(temporally_aggregated_cols),
                         "target_share_alpha": args.target_share_alpha,
                         "static_share": float(static_shares.loc[turbine]),
                     }
@@ -1051,6 +1088,9 @@ def main() -> None:
                         "n_features": len(feature_cols),
                         "window": args.window,
                         "weather_source": args.weather_source,
+                        "temporal_representation": args.temporal_representation,
+                        "temporal_representation_window": args.temporal_representation_window,
+                        "n_temporally_aggregated": len(temporally_aggregated_cols),
                         "target_share_alpha": args.target_share_alpha,
                     }
                 )
@@ -1090,6 +1130,9 @@ def main() -> None:
     summary["n_models"] = model_counter
     summary["n_features"] = scores["n_features"].max()
     summary["window"] = args.window
+    summary["point_loss"] = args.point_loss
+    summary["temporal_representation"] = args.temporal_representation
+    summary["temporal_representation_window"] = args.temporal_representation_window
     pd.DataFrame(training_rows).to_csv(
         args.results_dir / f"{args.stem}_training.csv", index=False, encoding="utf-8-sig"
     )
