@@ -2771,3 +2771,29 @@ nonzero differences > 1e-9 = 0
 - pooled mean panel `0.608959`, full local panel `0.617830` (`+0.008872`). full panel은 nMAE `0.136223→0.134994`, FiCR `0.354140→0.370655`로 모두 개선.
 - group별 mean→full: g1 `0.601696→0.633956`, g2 `0.655685→0.645968`, g3 `0.569495→0.573567`. local 배열은 g1에서 결정적이지만 g2는 터빈 평균화가 더 강함.
 - 결론: local-panel 가설은 확인했으나 단일 flatten TCN standalone은 기존 per-turbine/issue24 TCN 체급 미달. 현재 pipeline 승격 없이 단지별 공간 집계 구조의 근거로 유지.
+### 2026-07-17 - Group two-sided Kneedle + cube-root mid TCN72 OOF v1
+
+- duck CPU, strict outer-year. 원래 power empirical curve의 `D=y-x` 양쪽 극값으로 group별 lower/upper knee를 찾고, 그 사이만 W72 h128-L3(RF29) cube-root TCN을 학습. public-best 고정 구조 PINN/TREE/TCN=`50/5/45` OOF를 low/high baseline으로 사용; submission 없음.
+- hard 교체는 baseline `0.638013`에서 `0.620231`로 하락했고 8/8 group-year가 악화. 전체 cube-root 전문가는 `0.578823`; 중앙 전문가 단독 calibration이 기존 ensemble보다 약했음.
+- 사후 진단 cube-root-space mid blend는 5% `0.638878` (`+0.000865`, nMAE/FiCR 모두 개선, 7/8 fold 및 3/3 pooled group 개선), 15% `0.639086` (`+0.001073`, 6/8 fold). 동일 OOF weight 진단이므로 아직 승격하지 않음.
+- knee는 대체로 lower `4.34~5.61m/s`, upper `8.70~9.98m/s`; g2 pred2023 upper만 `11.58m/s`로 불안정. 다음 후보는 hard switch가 아니라 고정 5% mid correction의 multi-seed 안정성 검증.
+
+### 2026-07-17 - Kneedle cube-root mid TCN72 v2: metric 10% cutoff correction
+
+- v1은 채점에서만 10% 미만을 제외하고 Kneedle fitting/TCN loss에는 포함한 오류가 있어 모델 선택 결과에서 제외. v2는 curve와 중앙 전문가 학습 모두 `actual/capacity >= 0.10`만 사용; submission 없음.
+- hard switch는 `0.620231 -> 0.627582`로 크게 회복했지만 baseline `0.638013`에는 미달. lower knee가 대표적으로 g1/2022 `5.24 -> 6.56m/s`, 중앙 학습행은 `7,946 -> 5,412`로 변경.
+- 사후 cube-root-space mid blend 15%는 `0.638671` (`+0.000658`), nMAE `0.132610 -> 0.131798`, FiCR `0.408636 -> 0.409140`; 8 fold 중 7개 개선, g2/2022만 `-0.000732`.
+- g2/2023 및 g3/2023 upper knee가 각각 `11.51/11.50m/s`로 밀리는 불안정성은 남음. 동일 OOF blend 진단이므로 multi-seed 전 승격/제출 없음.
+
+### 2026-07-17 - SCADA model-specific cut-in/out soft gate OOF
+
+- bear CPU, 재학습 없는 strict outer-year 진단. 각 fold의 train-year SCADA만 사용해 isolated zero-wind sensor를 제거하고, 발전 1% 이상 운전확률의 50% crossing으로 Vestas/Unison별 cut-in/out을 추정. test-observable `teacher_ws_cubic`에 soft gate를 적용했으며 submission 없음.
+- cut-in은 Vestas `3.67~3.81m/s`, Unison `3.12~4.15m/s`. Vestas cut-out은 모든 fold에서 미검출, Unison은 `20.39~21.60m/s`였으나 OOF 예보풍속이 cut-out 이상인 행은 0개. cut-out-only tau1은 `-0.000110`으로 기각.
+- turbine floor20 적용 뒤 cut-in gate를 둔 tau1 current ensemble은 pooled OOF `0.638013 -> 0.639496` (`+0.001483`), nMAE `0.132610 -> 0.131160`, FiCR `0.408636 -> 0.410153`; 8/8 group-year와 3/3 pooled group 개선. tau0.5/1.5도 각각 `+0.000852/+0.001241`.
+- standalone PINN은 `0.630325 -> 0.629245`로 하락해 gate 자체가 더 강한 PINN은 아니고 ensemble correction 신호로 작동. gate-after-floor는 기존 20% floor를 풍속 조건부로 완화하므로 동일 OOF tau 진단만으로 승격하지 않으며, 다음 단계는 사용자 승인 후 학습 forward에 동일 gate를 넣은 완전 OOF 재학습.
+
+### 2026-07-17 - SCADA cut-in feature pure-band TCN OOF
+
+- bear RTX 4080, strict outer-year. 현재 `pure_band` issue24 h128-L3 TCN에 fold train-year SCADA로 구한 모델별 cut-in과 RF-OOB `teacher_ws_cubic` 기반 turbine별 soft gate/margin 및 group 집계를 입력으로 추가. target/loss/metric은 기존처럼 발전용량 하위 10% 제외; submission 없음.
+- standalone TCN은 기존 `0.636109`에서 `0.634449`로 하락해 100% 교체는 기각. 고정 PINN/TREE/TCN=`50/5/45`에서 TCN 내부를 기존 75% + cut-in feature 25%로 섞으면 `0.638013 -> 0.638617` (`+0.000604`), nMAE `0.132610 -> 0.132126`, FiCR `0.408636 -> 0.409360`.
+- 25% 혼합은 8개 group-year 중 6개, pooled group 3개 중 g1/g3 2개 개선; g1/2022 `-0.000967`, g2/2024 `-0.001390`은 악화. 100% 교체 ensemble은 `0.637024`. 동일 OOF 혼합 진단이므로 주력 승격 없이 보조 TCN 후보로만 유지.
