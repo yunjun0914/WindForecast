@@ -49,9 +49,6 @@ from utils.per_turbine_scada import (
 )
 from utils.power_curve import GROUP_TURBINE_PREFIXES
 from utils.per_turbine_sequence import SequenceStandardScaler
-from utils.target_transforms import (
-    inverse_normalized_prediction,
-)
 
 
 VARIANTS = (
@@ -71,6 +68,16 @@ STACK_RAW_VARIANT = "et_scada_raw"
 STACK_WIND_ISO_VARIANT = "et_scada_wind_isotonic"
 STACK_POWER_ISO_VARIANT = "et_scada_wind_power_isotonic"
 POWER_ISOTONIC_ALPHAS = (0.0, 0.25, 0.50, 0.75, 1.0)
+
+
+def inverse_normalized_prediction(
+    prediction: np.ndarray, target_transform: str
+) -> np.ndarray:
+    if target_transform == "power":
+        return prediction
+    if target_transform == "cuberoot":
+        return np.power(np.clip(prediction, 0.0, None), 3.0)
+    raise ValueError(f"Unknown target transform: {target_transform}")
 
 
 @dataclass
