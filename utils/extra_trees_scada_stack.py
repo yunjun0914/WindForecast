@@ -373,11 +373,14 @@ def build_extra_trees_scada_stack(
             float(scales[turbine_index]),
         )
         missing_calibrated = ~np.isfinite(calibrated_train[:, turbine_index])
-        calibrated_train[missing_calibrated, turbine_index] = _apply_wind_isotonic(
-            final_calibrator,
-            raw_train[missing_calibrated, turbine_index],
-            float(scales[turbine_index]),
-        )
+        if missing_calibrated.any():
+            calibrated_train[missing_calibrated, turbine_index] = (
+                _apply_wind_isotonic(
+                    final_calibrator,
+                    raw_train[missing_calibrated, turbine_index],
+                    float(scales[turbine_index]),
+                )
+            )
         calibrated_validation[:, turbine_index] = _apply_wind_isotonic(
             final_calibrator,
             raw_validation[:, turbine_index],
