@@ -124,6 +124,7 @@ def discover_stage1_epoch(
     best_wind_mae = np.nan
     bad_epochs = 0
     epochs_trained = 0
+    epoch_curve: list[dict[str, float | int]] = []
     for epoch in range(1, args.wind_epochs + 1):
         base.train_wind_epochs(model, loader, optimizer, 1, scale, args, device)
         prediction = base.predict_wind_flat(
@@ -139,11 +140,19 @@ def discover_stage1_epoch(
                 )
             )
         )
+        wind_mae = float(np.mean(np.abs(prediction[valid] - actual[valid])))
+        epoch_curve.append(
+            {
+                "epoch": int(epoch),
+                "wind_cubic_mae": cubic_mae,
+                "wind_mae": wind_mae,
+            }
+        )
         epochs_trained = epoch
         if cubic_mae < best_cubic_mae - args.wind_min_delta:
             best_epoch = epoch
             best_cubic_mae = cubic_mae
-            best_wind_mae = float(np.mean(np.abs(prediction[valid] - actual[valid])))
+            best_wind_mae = wind_mae
             bad_epochs = 0
         else:
             bad_epochs += 1
@@ -161,6 +170,7 @@ def discover_stage1_epoch(
         "val_cubic_mae": float(best_cubic_mae),
         "val_wind_mae": float(best_wind_mae),
         "wind_scale_p99": float(scale),
+        "epoch_curve": epoch_curve,
     }
     del model, optimizer, loader, scaled_panel
     base.release_cuda()
@@ -1310,6 +1320,24 @@ def main() -> None:
         stage1_wind,
         stage1_corrected,
     )
+    epoch_curve_rows = []
+    for row in stage1_discovery:
+        for point in row["epoch_curve"]:
+            epoch_curve_rows.append(
+                {
+                    "scope": "epoch_discovery",
+                    "model": "tcn1_validation_curve",
+                    "group": row["group"],
+                    "pred_year": row["pred_year"],
+                    "turbine_id": np.nan,
+                    "epoch": point["epoch"],
+                    "wind_mae": point["wind_mae"],
+                    "wind_cubic_mae": point["wind_cubic_mae"],
+                    "wind_bias": np.nan,
+                    "n_wind": np.nan,
+                }
+            )
+    wind = pd.concat([wind, pd.DataFrame(epoch_curve_rows)], ignore_index=True)
     scores["tcn1_fixed_epoch"] = tcn1_fixed_epoch
     scores["tcn2_fixed_epoch"] = tcn2_fixed_epoch
     scores["residual_rounds"] = residual_rounds
