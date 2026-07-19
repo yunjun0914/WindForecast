@@ -12,7 +12,7 @@ from utils.power_curve import GROUP_TURBINE_PREFIXES
 from utils.preprocessing import TIME_KEY_COLS
 
 
-REBUILT_OPTIMAL_GRID_CACHE_VERSION = "per_turbine_optimal_grid_rebuilt_v2"
+REBUILT_OPTIMAL_GRID_CACHE_VERSION = "per_turbine_optimal_grid_rebuilt_v3_cubic"
 
 
 @dataclass(frozen=True)
@@ -77,6 +77,7 @@ def _fit_affine_candidates(
     candidates: np.ndarray,
     target: np.ndarray,
     fit_mask: np.ndarray,
+    selection_metric: str = "mae",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     observed = (
         fit_mask[:, None]
@@ -105,10 +106,16 @@ def _fit_affine_candidates(
     slope = np.clip(slope, 0.25, 4.0)
     intercept = np.clip(mean_y - slope * mean_x, -10.0, 10.0)
     calibrated = np.clip(candidates * slope + intercept, 0.0, 40.0)
-    absolute_error = np.where(observed, np.abs(calibrated - target[:, None]), 0.0)
-    mae = absolute_error.sum(axis=0) / safe_count
-    mae[count < 100] = np.inf
-    return slope, intercept, mae, count
+    if selection_metric == "mae":
+        absolute_error = np.abs(calibrated - target[:, None])
+    elif selection_metric == "cubic_mae":
+        absolute_error = np.abs(calibrated**3 - target[:, None] ** 3)
+    else:
+        raise ValueError(f"Unknown optimal-grid selection metric: {selection_metric}")
+    absolute_error = np.where(observed, absolute_error, 0.0)
+    selection_error = absolute_error.sum(axis=0) / safe_count
+    selection_error[count < 100] = np.inf
+    return slope, intercept, selection_error, count
 
 
 def select_optimal_grid_features(
@@ -141,10 +148,16 @@ def select_optimal_grid_features(
         target = pd.to_numeric(
             forecast_times.map(target_map), errors="coerce"
         ).to_numpy(float)
-        slope, intercept, mae, count = _fit_affine_candidates(
-            candidates.ws, target, fit_year
+        selection_metric = (
+            "cubic_mae" if wind_target == "scada_ws_cubic" else "mae"
         )
-        selected = int(np.argmin(mae))
+        slope, intercept, selection_error, count = _fit_affine_candidates(
+            candidates.ws,
+            target,
+            fit_year,
+            selection_metric=selection_metric,
+        )
+        selected = int(np.argmin(selection_error))
         raw_ws = candidates.ws[:, selected].astype(float)
         calibrated = np.clip(
             slope[selected] * raw_ws + intercept[selected], 0.0, 40.0
@@ -169,7 +182,8 @@ def select_optimal_grid_features(
                 "candidate": candidates.names[selected],
                 "slope": float(slope[selected]),
                 "intercept": float(intercept[selected]),
-                "train_wind_mae": float(mae[selected]),
+                "selection_metric": selection_metric,
+                "train_selection_error": float(selection_error[selected]),
                 "n_train_wind": int(count[selected]),
             }
         )

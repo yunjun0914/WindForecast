@@ -6,6 +6,7 @@ import pandas as pd
 from utils.per_turbine_features import GFS_LEVELS, LDAPS_LEVELS
 from utils.per_turbine_optimal_grid_builder import (
     WindCandidateMatrix,
+    _fit_affine_candidates,
     build_wind_candidate_matrix,
     select_optimal_grid_features,
 )
@@ -30,6 +31,25 @@ def raw_weather(n_grids, levels):
 
 
 class OptimalGridBuilderTests(unittest.TestCase):
+    def test_cubic_selection_error_matches_cube_space_mae(self):
+        target = np.linspace(2.0, 14.0, 120)
+        candidates = np.column_stack(
+            [target * 0.8 + 0.3, np.sqrt(target) * 3.0]
+        )
+        fit_mask = np.ones(len(target), dtype=bool)
+
+        slope, intercept, error, count = _fit_affine_candidates(
+            candidates,
+            target,
+            fit_mask,
+            selection_metric="cubic_mae",
+        )
+
+        calibrated = np.clip(candidates * slope + intercept, 0.0, 40.0)
+        expected = np.mean(np.abs(calibrated**3 - target[:, None] ** 3), axis=0)
+        self.assertTrue(np.allclose(error, expected))
+        self.assertTrue(np.all(count == len(target)))
+
     def test_builds_all_118_grid_level_candidates(self):
         candidates = build_wind_candidate_matrix(
             raw_weather(16, LDAPS_LEVELS),
