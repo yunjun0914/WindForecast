@@ -10,6 +10,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from lightgbm import LGBMRegressor
+from sklearn.isotonic import IsotonicRegression
 
 
 TARGET_GROUPS = ["kpx_group_1", "kpx_group_2", "kpx_group_3"]
@@ -74,7 +75,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=["wind-ablation", "residual"],
+        choices=["wind-ablation", "residual", "isotonic"],
         default="wind-ablation",
     )
     parser.add_argument("--data-dir", type=Path, default=root / "data")
@@ -822,6 +823,34 @@ def residual_score_chart(metrics: pd.DataFrame) -> str:
     return "".join(elements)
 
 
+def isotonic_score_chart(metrics: pd.DataFrame) -> str:
+    overall = metrics[metrics["scope"].eq("overall")].set_index("variant")
+    variants = ["candidate_raw", "candidate_isotonic"]
+    colors = {"candidate_raw": "#64748b", "candidate_isotonic": "#0f766e"}
+    labels = {
+        "candidate_raw": "Candidate raw",
+        "candidate_isotonic": "Group Isotonic",
+    }
+    elements = [
+        '<svg viewBox="0 0 760 230" role="img" aria-label="Isotonic OOF 점수 비교">',
+        '<line x1="90" y1="190" x2="730" y2="190" stroke="#cbd5e1"/>',
+    ]
+    for index, variant in enumerate(variants):
+        score = float(overall.loc[variant, "score"])
+        x = 180 + index * 310
+        bar_height = max(1.0, score * 160.0)
+        y = 190.0 - bar_height
+        elements.extend(
+            [
+                f'<rect x="{x}" y="{y:.1f}" width="150" height="{bar_height:.1f}" fill="{colors[variant]}"/>',
+                f'<text x="{x + 75}" y="{y - 10:.1f}" text-anchor="middle" font-size="22" font-weight="700">{score:.6f}</text>',
+                f'<text x="{x + 75}" y="216" text-anchor="middle" font-size="14">{labels[variant]}</text>',
+            ]
+        )
+    elements.append("</svg>")
+    return "".join(elements)
+
+
 def render_table(frame: pd.DataFrame, columns: list[str], labels: list[str]) -> str:
     header = "".join(f"<th>{html.escape(label)}</th>" for label in labels)
     rows = []
@@ -971,6 +1000,78 @@ code{{background:#eef2f6;padding:2px 5px;border-radius:3px}} .method{{border-lef
 <h2>그룹·연도별 안정성</h2><div class="panel">{render_table(year_metrics, ['variant','group','year','score','nmae','ficr'], ['모델','그룹','연도','점수','NMAE','FiCR'])}</div>
 <h2>Outer fold별 base mapping과 residual epoch</h2><div class="panel">{render_table(details, ['validation_year','turbine_id','feature','grid_id','base_best_iteration','residual_best_iteration','residual_inner_iterations','base_train_rows'], ['검증연도','터빈','Base feature','격자','Base epoch','Residual epoch','Residual inner epoch','Base 학습 행'])}</div>
 <h2>SCADA target 품질</h2><div class="panel">{render_table(audit, ['turbine_id','invalid_power_10m_rows','valid_hourly_target_rows','valid_hourly_wind_rows'], ['터빈','제외한 10분 power','유효 시간 target','유효 시간 wind'])}</div>
+<h2>그룹 운영정지 제외 현황</h2><div class="panel">{render_table(shutdown_table, ['group','year','hours'], ['그룹','연도','학습 제외 시간'])}</div>
+</main></body></html>"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(document, encoding="utf-8")
+
+
+def write_isotonic_dashboard(
+    path: Path,
+    metrics: pd.DataFrame,
+    details: pd.DataFrame,
+    audit: pd.DataFrame,
+    shutdown: pd.DataFrame,
+) -> None:
+    overall = metrics[metrics["scope"].eq("overall")].set_index("variant")
+    raw_score = float(overall.loc["candidate_raw", "score"])
+    isotonic_score = float(overall.loc["candidate_isotonic", "score"])
+    delta = isotonic_score - raw_score
+    label_map = {
+        "candidate_raw": "Candidate raw",
+        "candidate_isotonic": "Group Isotonic",
+    }
+    group_metrics = metrics[metrics["scope"].eq("group")].copy()
+    group_metrics["variant"] = group_metrics["variant"].map(label_map)
+    year_metrics = metrics[metrics["scope"].eq("group_year")].copy()
+    year_metrics["variant"] = year_metrics["variant"].map(label_map)
+    calibration = details[
+        [
+            "group",
+            "validation_year",
+            "train_years",
+            "isotonic_train_rows",
+            "isotonic_knots",
+            "isotonic_x_min",
+            "isotonic_x_max",
+        ]
+    ].drop_duplicates()
+    shutdown_rows = []
+    for group in TARGET_GROUPS:
+        for year, values in shutdown[group].groupby(interval_year(shutdown.index)):
+            if int(year) in (2022, 2023, 2024):
+                shutdown_rows.append(
+                    {"group": group, "year": int(year), "hours": int(values.sum())}
+                )
+    shutdown_table = pd.DataFrame(shutdown_rows)
+    document = f"""<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>그룹 Isotonic Regression OOF</title>
+<style>
+body{{margin:0;background:#f8fafc;color:#172033;font-family:Arial,'Malgun Gothic',sans-serif}}
+main{{max-width:1180px;margin:auto;padding:32px 28px 64px}} h1{{font-size:30px;margin:0 0 8px}} h2{{font-size:21px;margin:34px 0 12px}}
+p{{line-height:1.65;color:#475569}} .metrics{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:22px 0}}
+.metric{{background:white;border:1px solid #dbe3ec;border-radius:6px;padding:16px}} .metric span{{display:block;color:#64748b;font-size:13px}}
+.metric strong{{display:block;font-size:25px;margin-top:7px}} .positive{{color:#0f766e}} .negative{{color:#b42318}}
+.panel{{background:white;border:1px solid #dbe3ec;border-radius:6px;padding:18px;margin-top:12px;overflow:auto}}
+table{{border-collapse:collapse;width:100%;font-size:12px}} th,td{{border-bottom:1px solid #e2e8f0;padding:8px;text-align:right;white-space:nowrap}}
+th:first-child,td:first-child{{text-align:left}} th{{background:#f1f5f9;color:#334155;position:sticky;top:0}}
+code{{background:#eef2f6;padding:2px 5px;border-radius:3px}} .method{{border-left:4px solid #0f766e;padding:10px 14px;background:#ecfdf5;color:#334155}}
+</style></head><body><main>
+<h1>그룹 Isotonic Regression OOF</h1>
+<p>터빈별 Candidate LGBM 예측을 그룹 단위로 합산한 뒤, 그룹별 단조 보정 곡선을 적용했습니다.</p>
+<div class="metrics">
+<div class="metric"><span>Candidate raw</span><strong>{raw_score:.6f}</strong></div>
+<div class="metric"><span>Group Isotonic</span><strong>{isotonic_score:.6f}</strong></div>
+<div class="metric"><span>Isotonic - Raw</span><strong class="{'positive' if delta >= 0 else 'negative'}">{delta:+.6f}</strong></div>
+</div>
+<div class="panel">{isotonic_score_chart(metrics)}</div>
+<h2>검증 계약</h2>
+<div class="method">각 outer-train 내부의 터빈별 cross-fit 예측을 합산해 보정 학습 입력을 만들었습니다. Isotonic은 <code>cross-fit group prediction -&gt; official group label</code>만 학습하며 outer-validation label은 보지 않습니다. <code>increasing=True</code>, <code>out_of_bounds=clip</code>, 출력 범위는 그룹 용량으로 제한했습니다.</div>
+<h2>그룹별 pooled OOF</h2><div class="panel">{render_table(group_metrics, ['variant','group','score','nmae','ficr','evaluated_rows'], ['모델','그룹','점수','NMAE','FiCR','평가 행'])}</div>
+<h2>그룹·연도별 안정성</h2><div class="panel">{render_table(year_metrics, ['variant','group','year','score','nmae','ficr'], ['모델','그룹','연도','점수','NMAE','FiCR'])}</div>
+<h2>Outer fold별 Isotonic 곡선</h2><div class="panel">{render_table(calibration, ['group','validation_year','train_years','isotonic_train_rows','isotonic_knots','isotonic_x_min','isotonic_x_max'], ['그룹','검증연도','학습연도','보정 학습 행','knot 수','학습 예측 최솟값','학습 예측 최댓값'])}</div>
+<h2>Outer fold별 Candidate mapping과 epoch</h2><div class="panel">{render_table(details, ['validation_year','turbine_id','feature','grid_id','mapping_l3_ms','base_best_iteration','base_inner_iterations','base_train_rows'], ['검증연도','터빈','LDAPS feature','격자','학습구간 L3','Base epoch','Base inner epoch','Base 학습 행'])}</div>
+<h2>SCADA target 점검</h2><div class="panel">{render_table(audit, ['turbine_id','invalid_power_10m_rows','valid_hourly_target_rows','valid_hourly_wind_rows'], ['터빈','제외된 10분 power','유효 시간 target','유효 시간 wind'])}</div>
 <h2>그룹 운영정지 제외 현황</h2><div class="panel">{render_table(shutdown_table, ['group','year','hours'], ['그룹','연도','학습 제외 시간'])}</div>
 </main></body></html>"""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1145,9 +1246,12 @@ def run(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFr
     return oof, metrics, mappings
 
 
-def run_residual(
+def run_postprocess(
     args: argparse.Namespace,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    if args.mode not in {"residual", "isotonic"}:
+        raise ValueError(f"지원하지 않는 후처리 mode입니다: {args.mode}")
+    use_residual = args.mode == "residual"
     metadata = load_metadata(args.data_dir / "info.xlsx")
     labels = pd.read_csv(
         args.data_dir / "train" / "train_labels.csv",
@@ -1157,7 +1261,13 @@ def run_residual(
     ldaps, speed_matrices = load_ldaps(
         args.data_dir / "train" / "ldaps_train.csv"
     )
-    residual_features, residual_manifest = build_residual_features(args.data_dir)
+    ldaps_forecast_index = pd.DatetimeIndex(
+        ldaps.index.get_level_values("forecast_kst_dtm").unique()
+    )
+    residual_features = None
+    residual_manifest = None
+    if use_residual:
+        residual_features, residual_manifest = build_residual_features(args.data_dir)
     targets, winds, shutdown, audit = load_scada(args.data_dir, metadata)
     feature_cache: dict[tuple[str, int], pd.DataFrame] = {}
 
@@ -1185,8 +1295,16 @@ def run_residual(
             train_index = train_index[
                 ~shutdown[group].reindex(train_index, fill_value=False).to_numpy(bool)
             ]
-            train_index = train_index.intersection(residual_features.index)
-            validation_index = validation_index.intersection(residual_features.index)
+            if use_residual:
+                train_index = train_index.intersection(residual_features.index)
+                validation_index = validation_index.intersection(
+                    residual_features.index
+                )
+            else:
+                train_index = train_index.intersection(ldaps_forecast_index)
+                validation_index = validation_index.intersection(
+                    ldaps_forecast_index
+                )
             crossfit_folds = make_inner_folds(train_index)
             candidate_mapping = {
                 turbine: select_candidate_mapping(
@@ -1194,8 +1312,9 @@ def run_residual(
                 )
                 for turbine in group_metadata["turbine_id"]
             }
+            mode_label = "residual" if use_residual else "isotonic"
             print(
-                f"[residual {group} / {validation_year}] train={train_years}, "
+                f"[{mode_label} {group} / {validation_year}] train={train_years}, "
                 f"calibration_rows={len(train_index)}, validation_rows={len(validation_index)}",
                 flush=True,
             )
@@ -1247,23 +1366,47 @@ def run_residual(
                 )
             outer_base = np.clip(outer_base, 0.0, GROUP_CAPACITY_KWH[group])
             crossfit_base = crossfit_base.clip(0.0, GROUP_CAPACITY_KWH[group])
-            residual_target = (
-                labels[group].reindex(train_index).astype(float) - crossfit_base
-            )
-            correction, residual_best, residual_inner = train_residual_model(
-                residual_features,
-                residual_target,
-                train_index,
-                validation_index,
-                args,
-            )
-            corrected = np.clip(
-                outer_base + correction, 0.0, GROUP_CAPACITY_KWH[group]
-            )
+            if use_residual:
+                residual_target = (
+                    labels[group].reindex(train_index).astype(float) - crossfit_base
+                )
+                correction, residual_best, residual_inner = train_residual_model(
+                    residual_features,
+                    residual_target,
+                    train_index,
+                    validation_index,
+                    args,
+                )
+                postprocessed = np.clip(
+                    outer_base + correction, 0.0, GROUP_CAPACITY_KWH[group]
+                )
+                postprocessed_variant = "candidate_residual"
+            else:
+                calibration_actual = labels[group].reindex(train_index).astype(float)
+                calibration_valid = (
+                    crossfit_base.notna() & calibration_actual.notna()
+                )
+                if int(calibration_valid.sum()) < 1000:
+                    raise ValueError("Isotonic 학습 표본이 1,000개 미만입니다.")
+                calibrator = IsotonicRegression(
+                    increasing=True,
+                    y_min=0.0,
+                    y_max=GROUP_CAPACITY_KWH[group],
+                    out_of_bounds="clip",
+                )
+                calibration_x = crossfit_base.loc[calibration_valid].to_numpy(float)
+                calibration_y = calibration_actual.loc[calibration_valid].to_numpy(float)
+                calibrator.fit(calibration_x, calibration_y)
+                postprocessed = np.clip(
+                    calibrator.predict(outer_base),
+                    0.0,
+                    GROUP_CAPACITY_KWH[group],
+                )
+                postprocessed_variant = "candidate_isotonic"
             actual = labels.loc[validation_index, group].to_numpy(float)
             for variant, prediction in [
                 ("candidate_raw", outer_base),
-                ("candidate_residual", corrected),
+                (postprocessed_variant, postprocessed),
             ]:
                 prediction_rows.append(
                     pd.DataFrame(
@@ -1278,12 +1421,18 @@ def run_residual(
                     )
                 )
             for row in fold_details:
-                row["residual_best_iteration"] = residual_best
-                row["residual_inner_iterations"] = "|".join(
-                    map(str, residual_inner)
-                )
-                row["residual_feature_count"] = len(residual_features.columns)
-                row["residual_train_rows"] = len(train_index)
+                if use_residual:
+                    row["residual_best_iteration"] = residual_best
+                    row["residual_inner_iterations"] = "|".join(
+                        map(str, residual_inner)
+                    )
+                    row["residual_feature_count"] = len(residual_features.columns)
+                    row["residual_train_rows"] = len(train_index)
+                else:
+                    row["isotonic_train_rows"] = int(calibration_valid.sum())
+                    row["isotonic_knots"] = len(calibrator.X_thresholds_)
+                    row["isotonic_x_min"] = float(calibration_x.min())
+                    row["isotonic_x_max"] = float(calibration_x.max())
                 detail_rows.append(row)
 
     oof = pd.concat(prediction_rows, ignore_index=True)
@@ -1291,26 +1440,40 @@ def run_residual(
     details = pd.DataFrame(detail_rows).sort_values(
         ["validation_year", "turbine_id"]
     )
+    expected_variants = (
+        {"candidate_raw", "candidate_residual"}
+        if use_residual
+        else {"candidate_raw", "candidate_isotonic"}
+    )
     validate_outputs(
         oof,
         metrics,
         details,
-        {"candidate_raw", "candidate_residual"},
+        expected_variants,
         12 * 3 + 5 * 2,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     write_csv(oof, args.output_dir / "oof_predictions.csv")
     write_csv(metrics, args.output_dir / "oof_metrics.csv")
     write_csv(details, args.output_dir / "feature_mappings.csv")
-    write_residual_dashboard(
-        args.output_dir / "dashboard.html",
-        metrics,
-        details,
-        residual_manifest,
-        audit,
-        shutdown,
-        args,
-    )
+    if use_residual:
+        write_residual_dashboard(
+            args.output_dir / "dashboard.html",
+            metrics,
+            details,
+            residual_manifest,
+            audit,
+            shutdown,
+            args,
+        )
+    else:
+        write_isotonic_dashboard(
+            args.output_dir / "dashboard.html",
+            metrics,
+            details,
+            audit,
+            shutdown,
+        )
     return oof, metrics, details
 
 
@@ -1319,7 +1482,7 @@ def main() -> None:
     if args.mode == "wind-ablation":
         _, metrics, _ = run(args)
     else:
-        _, metrics, _ = run_residual(args)
+        _, metrics, _ = run_postprocess(args)
     overall = metrics[metrics["scope"].eq("overall")][
         ["variant", "score", "nmae", "ficr"]
     ]
