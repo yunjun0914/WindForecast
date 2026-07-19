@@ -34,6 +34,7 @@ RESIDUAL_LOCAL_FEATURES = tuple(
 RAW_TCN2_VARIANT = "tcn2_raw_tcn1"
 RESIDUAL_TCN2_VARIANT = "tcn2_residual_corrected_tcn1"
 ISOTONIC_TCN2_VARIANT = "tcn2_residual_corrected_tcn1_isotonic"
+ISOTONIC_ALPHA_GRID = (0.0, 0.25, 0.50, 0.75, 1.0)
 
 
 def raw_wind_anchor(
@@ -755,6 +756,42 @@ def prediction_frame(
     return pd.concat(parts, ignore_index=True)
 
 
+def fit_isotonic(frame: pd.DataFrame, capacity: float) -> IsotonicRegression:
+    valid = np.isfinite(frame["pred"]) & np.isfinite(frame["official_target"])
+    if int(valid.sum()) < 1000:
+        raise ValueError(f"Too few isotonic rows: {valid.sum()}")
+    calibrator = IsotonicRegression(
+        increasing=True,
+        y_min=0.0,
+        y_max=capacity,
+        out_of_bounds="clip",
+    )
+    calibrator.fit(
+        frame.loc[valid, "pred"].to_numpy(float),
+        frame.loc[valid, "official_target"].to_numpy(float),
+    )
+    return calibrator
+
+
+def isotonic_inner_folds(frame: pd.DataFrame) -> list[tuple[np.ndarray, np.ndarray]]:
+    years = sorted(frame["pred_year"].unique())
+    if len(years) >= 2:
+        return [
+            (
+                np.flatnonzero(frame["pred_year"].ne(year).to_numpy()),
+                np.flatnonzero(frame["pred_year"].eq(year).to_numpy()),
+            )
+            for year in years
+        ]
+    issues = np.sort(frame["issue_kst_dtm"].unique())
+    issue_folds = [chunk for chunk in np.array_split(issues, 3) if len(chunk)]
+    folds = []
+    for heldout in issue_folds:
+        val_mask = frame["issue_kst_dtm"].isin(heldout).to_numpy()
+        folds.append((np.flatnonzero(~val_mask), np.flatnonzero(val_mask)))
+    return folds
+
+
 def apply_isotonic_outer_oof(
     predictions: pd.DataFrame,
     source_variant: str,
@@ -765,25 +802,41 @@ def apply_isotonic_outer_oof(
         group_frame = source.loc[source["group"].eq(group)]
         capacity = float(GROUP_CAPACITY_KWH[group])
         for val_year in sorted(group_frame["pred_year"].unique()):
-            train = group_frame.loc[group_frame["pred_year"].ne(val_year)]
+            train = group_frame.loc[group_frame["pred_year"].ne(val_year)].reset_index(
+                drop=True
+            )
             val = group_frame.loc[group_frame["pred_year"].eq(val_year)].copy()
-            valid = np.isfinite(train["pred"]) & np.isfinite(train["official_target"])
-            if int(valid.sum()) < 1000:
-                raise ValueError(
-                    f"Too few isotonic rows for {group}/val{val_year}: {valid.sum()}"
+            crossfit_isotonic = np.full(len(train), np.nan, dtype=float)
+            for fit_indices, heldout_indices in isotonic_inner_folds(train):
+                calibrator = fit_isotonic(train.iloc[fit_indices], capacity)
+                crossfit_isotonic[heldout_indices] = calibrator.predict(
+                    train.iloc[heldout_indices]["pred"].to_numpy(float)
                 )
-            calibrator = IsotonicRegression(
-                increasing=True,
-                y_min=0.0,
-                y_max=capacity,
-                out_of_bounds="clip",
+            if not np.isfinite(crossfit_isotonic).all():
+                raise ValueError(f"Incomplete isotonic inner OOF: {group}/val{val_year}")
+
+            actual = train["official_target"].to_numpy(float)
+            raw = train["pred"].to_numpy(float)
+            alpha_scores = {}
+            for alpha in ISOTONIC_ALPHA_GRID:
+                blended = raw + alpha * (crossfit_isotonic - raw)
+                nmae, ficr = group_nmae_ficr(actual, blended, capacity)
+                alpha_scores[alpha] = 0.5 * (1.0 - nmae) + 0.5 * ficr
+            selected_alpha = max(
+                ISOTONIC_ALPHA_GRID,
+                key=lambda alpha: (alpha_scores[alpha], -alpha),
             )
-            calibrator.fit(
-                train.loc[valid, "pred"].to_numpy(float),
-                train.loc[valid, "official_target"].to_numpy(float),
+
+            final_calibrator = fit_isotonic(train, capacity)
+            raw_val = val["pred"].to_numpy(float)
+            isotonic_val = final_calibrator.predict(raw_val)
+            val["pred"] = np.clip(
+                raw_val + selected_alpha * (isotonic_val - raw_val),
+                0.0,
+                capacity,
             )
-            val["pred"] = calibrator.predict(val["pred"].to_numpy(float))
             val["variant"] = ISOTONIC_TCN2_VARIANT
+            val["isotonic_alpha"] = float(selected_alpha)
             parts.append(val)
     if not parts:
         raise ValueError("No isotonic OOF predictions were generated")
@@ -819,6 +872,11 @@ def score_diagnostics(predictions: pd.DataFrame) -> pd.DataFrame:
                 "row_within_6pct": float(np.mean(error_rate <= 0.06)),
                 "row_within_8pct": float(np.mean(error_rate <= 0.08)),
                 "evaluated_rows": int(len(actual)),
+                "mean_isotonic_alpha": (
+                    float(part["isotonic_alpha"].mean())
+                    if "isotonic_alpha" in part and part["isotonic_alpha"].notna().any()
+                    else np.nan
+                ),
             }
         )
     group_rows = pd.DataFrame(rows)
@@ -839,6 +897,11 @@ def score_diagnostics(predictions: pd.DataFrame) -> pd.DataFrame:
                 "row_within_6pct": float(part["row_within_6pct"].mean()),
                 "row_within_8pct": float(part["row_within_8pct"].mean()),
                 "evaluated_rows": int(part["evaluated_rows"].sum()),
+                "mean_isotonic_alpha": (
+                    float(part["mean_isotonic_alpha"].mean())
+                    if part["mean_isotonic_alpha"].notna().any()
+                    else np.nan
+                ),
             }
         )
     return pd.concat([group_rows, pd.DataFrame(summary_rows)], ignore_index=True)
