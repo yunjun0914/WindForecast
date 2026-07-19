@@ -432,7 +432,8 @@ def estimate_best_iteration(
         model.fit(
             features.loc[train_index],
             target.loc[train_index],
-            eval_set=[(features.loc[validation_index], target.loc[validation_index])],
+            eval_X=[features.loc[validation_index]],
+            eval_y=[target.loc[validation_index]],
             eval_metric="l1",
             callbacks=[
                 lgb.early_stopping(
