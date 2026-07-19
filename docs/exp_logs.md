@@ -2838,3 +2838,12 @@ nonzero differences > 1e-9 = 0
 - bear RTX 4080, strict outer-year. 현재 `pure_band` issue24 h128-L3 TCN에 fold train-year SCADA로 구한 모델별 cut-in과 RF-OOB `teacher_ws_cubic` 기반 turbine별 soft gate/margin 및 group 집계를 입력으로 추가. target/loss/metric은 기존처럼 발전용량 하위 10% 제외; submission 없음.
 - standalone TCN은 기존 `0.636109`에서 `0.634449`로 하락해 100% 교체는 기각. 고정 PINN/TREE/TCN=`50/5/45`에서 TCN 내부를 기존 75% + cut-in feature 25%로 섞으면 `0.638013 -> 0.638617` (`+0.000604`), nMAE `0.132610 -> 0.132126`, FiCR `0.408636 -> 0.409360`.
 - 25% 혼합은 8개 group-year 중 6개, pooled group 3개 중 g1/g3 2개 개선; g1/2022 `-0.000967`, g2/2024 `-0.001390`은 악화. 100% 교체 ensemble은 `0.637024`. 동일 OOF 혼합 진단이므로 주력 승격 없이 보조 TCN 후보로만 유지.
+
+### 2026-07-20 - Extra Trees SCADA stack + fixed-epoch group TCN OOF
+
+- bear RTX 4080, strict outer-year. group별 Extra Trees multi-output(500 trees, leaf 2)로 6/6/5기 `scada_ws_cubic`을 예측하고, wind Isotonic을 거친 cubic channel을 기존 `quota65 + turbine별 wake2/optimal-grid5` pure-band h128-L3 TCN에 추가. ET train feature와 wind Isotonic train feature는 모두 outer-train 내부 OOF로 생성.
+- epoch 탐색값은 `[21,1,8,9,5,7,5,13]`, 전체 group/fold 공통 fixed epoch는 중앙값 `8`. 모든 outer fold를 epoch 8로 처음부터 재학습했으며 power Isotonic도 outer-train 내부 TCN OOF에서 alpha를 선택. submission 없음.
+- pooled group-equal OOF: baseline `0.626643`, raw ET-SCADA `0.626895` (`+0.000252`), wind-Isotonic ET-SCADA `0.627706` (`+0.001063`). group별 baseline -> wind-Isotonic은 g1 `0.630953 -> 0.633649`, g2 `0.651101 -> 0.652693`, g3 `0.597874 -> 0.596777`.
+- wind Isotonic은 outer-validation 평균 풍속 MAE를 g1/g2/g3에서 각각 `1.3905/1.4194/1.3520 -> 1.3842/1.4087/1.3220`으로 낮췄지만, 정규화 cube-space MAE는 세 group 모두 약간 악화. 단조 inversion은 0이지만 고유값 보존율은 약 `2.1%`로 강한 계단형 압축이 발생.
+- power Isotonic은 8/8 outer fold에서 alpha `0.0`을 선택했고 alpha가 커질수록 inner OOF가 일관되게 하락해 기각. fixed epoch baseline 자체가 과거 fold-best pure-band `0.636109`보다 약하므로 현재 파이프라인을 주력으로 승격하지 않고, ET-SCADA 표현의 `+0.001063` 제어실험 신호만 유지.
+- 산출물은 `results/extra_trees_scada_tcn2_fixed_oof_v1_{predictions,scores,training}.csv` 세 개만 생성.
