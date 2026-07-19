@@ -1,49 +1,43 @@
 # WindForecast Agent Instructions
 
-이 파일은 이 레포에서 작업하는 Codex/에이전트가 먼저 읽어야 하는 기본 지침이다. 상세 인수인계는 `.agents/windforecast_agent_context.md`를 기준으로 한다.
+이 파일은 이 레포에서 작업하는 Codex/에이전트가 먼저 읽어야 하는 기본 지침이다.
 
 ## Must Read First
 
-1. `.agents/windforecast_agent_context.md`
-2. `docs/best_model_usage.md` (과거 모델 기록)
-3. `docs/rules.md`
-4. `docs/exp_logs.md` 최근 항목
+1. `docs/rules.md`
 
-## Current Best Model
-
-현재 최고 public 제출은 아래 파일이다.
-
-```text
-results/submission_jointmix_p50_t5_c45_pb50_cb25_v1.csv
-```
-
-Public score:
-
-```text
-score = 0.63999 (user-reported public score)
-time  = 2026-07-14 KST
-```
-
-구조:
-
-```text
-PINN_base_share = 0.50
-TCN_base_share  = 0.25
-final_raw       = 0.50 * PINN + 0.05 * TREE + 0.45 * TCN
-PINN_floor      = 0.20 * capacity
-final_floor     = 0.10 * capacity
-```
-
-주의:
+## Artifact Management
 
 - `results/`는 실험 산출물 디렉터리이므로 Git에서 기본적으로 무시한다.
 - 사용자 승인을 받은 최종 제출 CSV만 `git add -f <path>`로 명시적으로 추가한다.
 - OOF prediction, score, summary, diagnostics, log, archive, cache는 Git에 올리지 않는다.
-- `submission_share50_v1.csv`의 public score는 `0.639938`로 현재 최고보다 낮다.
-- 최종 weight, PINN floor, final floor는 사용자가 허락하지 않으면 임의로 바꾸지 않는다.
+- 실험 전에 canonical 산출물 목록을 먼저 정하고 최소한으로 유지한다. 같은 내용의 summary, diagnostics, chart, versioned copy를 반복 생성하지 않는다.
+- 상세 metric은 가능하면 하나의 테이블로, 선택 결과는 하나의 요약 테이블로 통합한다. 설명과 시각화는 하나의 대시보드나 보고서에 함께 담는다.
+- 재실행은 사용자가 별도 보존을 요청하지 않으면 같은 canonical 경로를 갱신한다. timestamp, `v2`, `final` 등의 복사 산출물을 만들지 않는다.
+- 렌더링 중간물과 임시 차트는 임시 디렉터리에서 생성하고 최종 산출물에는 남기지 않는다.
+
+## Experiment Script Management
+
+- 같은 실험군은 하나의 canonical runner로 관리한다. 작은 변경마다 `v2`, `v3`, `final`, `new` 등의 복사 스크립트를 만들지 않는다.
+- 실험 변형은 기존 runner의 CLI 옵션이나 명시적 설정으로 표현하고, 코드를 복사하여 분기하지 않는다.
+- 새 실험 스크립트를 만들기 전에 기존 runner로 표현할 수 없는 이유를 사용자에게 먼저 설명한다.
+- 실행별 차이는 스크립트 파일명이 아니라 결과 디렉터리, run name, 설정 manifest로 구분한다.
+- 공통 로직은 실제 중복이 확인될 때만 공유 모듈로 분리한다. 단일 실험을 위한 불필요한 추상화는 하지 않는다.
+
+## Documentation Language
+
+- 모든 문서 작업은 한국어로 작성한다. Markdown, README, 보고서, 실험 기록, 대시보드, 차트 제목·주석, 표 머리글, 사용자용 설명을 모두 포함한다.
+- 코드 식별자, 원본 데이터 컬럼명, 파일명, CLI 옵션, 외부 고유명사는 정확성을 위해 필요한 경우 영어를 유지할 수 있다. 사용자가 읽는 문서에서는 해당 의미를 한국어로 설명한다.
+- 같은 내용의 영문·한글 문서를 따로 복사하지 않고, 한국어 canonical 문서 하나만 유지한다.
 
 ## Collaboration Rules
 
+- 모든 EDA, 분석, 실험, 모델링, 코드 작성은 `전략 제시 -> 사용자의 명시적 승인 -> 구현`의 순서를 반드시 따른다.
+- 사용자가 실행을 명시적으로 승인하기 전에는 데이터 구조와 기존 소스를 읽기 전용으로만 확인한다. 폴더·파일 생성, 코드 수정, 학습·추론 실행, 산출물 생성은 하지 않는다.
+- 전략을 설명했다는 사실 자체는 실행 승인으로 간주하지 않는다. `해봐`, `진행해`, `실행해` 등 사용자의 명시적 지시가 있어야 구현을 시작한다.
+- 사용자의 주장이나 가설에 자동으로 동의하지 않는다. 데이터, 수학적 타당성, 검증 누수, 실제 배포 조건을 기준으로 독립적으로 판단한다.
+- 사용자의 주장이 틀렸거나 근거가 약하면 맞장구치지 말고 명확히 반박한다. 이때 틀린 전제, 반박 근거, 더 타당한 대안을 함께 설명하여 사용자를 설득한다.
+- 일부만 맞는 주장이라면 맞는 부분과 틀리거나 불확실한 부분을 구분해서 말한다. 확실하지 않은 내용을 동의나 반박으로 단정하지 않는다.
 - 실험이나 큰 코드 변경 전에 목적, 파이프라인, 기대 효과, 수정 파일, validation 방식, 예상 실행 시간, 결과 파일명을 사용자에게 먼저 설명한다.
 - 사용자가 명시하지 않으면 test submission을 만들지 않는다.
 - 작은 OOF 개선만으로 제출 후보를 만들지 않는다. 큰 개선 또는 사용자 명시 요청이 필요하다.
@@ -70,4 +64,4 @@ final_floor     = 0.10 * capacity
 conda run -n WindForecast python --version
 ```
 
-긴 학습/추론을 실행하기 전에는 어떤 branch(PINN/TREE/TCN)를 건드리는지 사용자에게 먼저 말한다.
+긴 학습/추론을 실행하기 전에는 어떤 구성 요소를 건드리는지 사용자에게 먼저 말한다.
