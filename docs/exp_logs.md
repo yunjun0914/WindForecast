@@ -11,12 +11,24 @@
 - 해석 주의: 상승분이 G3에 집중되어 있으며, 현재 결과만으로는 124개 기상 피처 효과와 단순 그룹 편향 보정 효과를 분리할 수 없음
 - 산출물: `results/per_turbine_lgbm_residual/`
 
-## 2026-07-19 | 그룹 Isotonic Regression OOF
+## 2026-07-19 | 그룹 Isotonic Regression OOF (구현 1차)
 
 - 기준 모델: 터빈별 Candidate LGBM 합산, pooled OOF `0.577870`
 - 보정 학습: 각 outer-train 내부의 cross-fit 그룹 예측과 공식 그룹 label만 사용한 그룹별 Isotonic
 - 결과: `0.559266` (`-0.018604`), NMAE `0.154199 -> 0.155627`, FiCR `0.309939 -> 0.274160`
 - 그룹별 점수 차이: G1 `-0.022290`, G2 `-0.045961`, G3 `+0.012438`
 - 날짜 블록 부트스트랩 5,000회: 전체 차이 95% 구간 `[-0.022930, -0.014482]`, 양수 확률 `0%`
-- 해석: G3의 체계적 과소예측은 완화했지만 G1·G2의 FiCR 구간 적중률을 크게 훼손함. per-turbine Isotonic으로 확장하지 않음
+- 해석: Isotonic을 100% 적용하고 inner OOF에서 대회 metric과 rank를 점검하지 않은 구현 문제. 아래 metric-aware 구현으로 대체
+- 산출물: `results/per_turbine_lgbm_isotonic/`
+
+## 2026-07-19 | Metric-aware 그룹 Isotonic OOF
+
+- 기준 모델: 터빈별 Candidate LGBM 합산, pooled OOF `0.577870`
+- 보정 학습: outer-train의 base OOF를 calibration fold로 다시 분리하고 `raw + alpha * (isotonic - raw)`의 alpha를 실제 NMAE·FiCR 점수로 선택
+- alpha 후보: `0.00, 0.25, 0.50, 0.75, 1.00`; G1·G2의 6개 fold는 모두 `0`, G3의 2개 fold는 모두 `1`
+- 결과: `0.582016` (`+0.004146`), NMAE `0.154199 -> 0.151779`, FiCR `0.309939 -> 0.315812`
+- 그룹별 점수 차이: G1 `0`, G2 `0`, G3 `+0.012438`
+- 날짜 블록 부트스트랩 5,000회: 전체 차이 95% 구간 `[+0.002511, +0.005730]`, 양수 확률 `100%`
+- rank: 8개 group-year fold의 단조 순위 역전은 모두 `0`; G3의 계단형 보정 ties와 fold별 곡선 차이로 pooled Spearman은 소폭 변함
+- 해석: Isotonic의 보편적 개선이 아니라 inner OOF가 G1·G2 보정을 거부하고 G3의 체계적 과소예측만 보정한 선택적 개선
 - 산출물: `results/per_turbine_lgbm_isotonic/`
