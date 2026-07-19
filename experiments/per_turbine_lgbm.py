@@ -34,12 +34,48 @@ SHUTDOWN_WIND_MS = 5.0
 SHUTDOWN_POWER_RATIO = 0.01
 SHUTDOWN_OTHER_RATIO = 0.10
 RANDOM_SEED = 20260719
+GFS_WIND_PAIRS = {
+    "10m": ("heightAboveGround_10_10u", "heightAboveGround_10_10v"),
+    "80m": ("heightAboveGround_80_u", "heightAboveGround_80_v"),
+    "100m": ("heightAboveGround_100_100u", "heightAboveGround_100_100v"),
+    "pbl": ("planetaryBoundaryLayer_0_u", "planetaryBoundaryLayer_0_v"),
+    "850hpa": ("isobaricInhPa_850_u", "isobaricInhPa_850_v"),
+    "700hpa": ("isobaricInhPa_700_u", "isobaricInhPa_700_v"),
+    "500hpa": ("isobaricInhPa_500_u", "isobaricInhPa_500_v"),
+}
+LDAPS_NONWIND_COLUMNS = [
+    "heightAboveGround_2_t",
+    "heightAboveGround_2_dpt",
+    "heightAboveGround_2_r",
+    "heightAboveGround_2_q",
+    "surface_0_sp",
+    "meanSea_0_prmsl",
+    "etc_0_blh",
+    "surface_0_NDNSW",
+    "surface_0_NDNLW",
+    "heightAboveGround_2_SWDIR",
+    "heightAboveGround_2_SWDIF",
+    "etc_0_hcc",
+    "etc_0_mcc",
+    "etc_0_lcc",
+    "etc_0_VLCDC",
+    "surface_0_avg_lsprate",
+    "surface_0_lssrate",
+    "surface_0_ncpcp",
+    "surface_0_snol",
+    "surface_0_SNOM",
+]
 
 
 def parse_args() -> argparse.Namespace:
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
         description="터빈별 LightGBM으로 최근접 10m와 EDA 선택 바람을 OOF 비교합니다."
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["wind-ablation", "residual"],
+        default="wind-ablation",
     )
     parser.add_argument("--data-dir", type=Path, default=root / "data")
     parser.add_argument(
@@ -378,6 +414,91 @@ def build_features(
     return result[FEATURE_NAMES]
 
 
+def aggregate_spatial_features(
+    frame: pd.DataFrame,
+    value_columns: list[str],
+    statistics: list[str],
+    prefix: str,
+) -> pd.DataFrame:
+    aggregated = frame.groupby("forecast_kst_dtm", sort=True)[value_columns].agg(
+        statistics
+    )
+    aggregated.columns = [
+        f"{prefix}__{column}__{statistic}"
+        for column, statistic in aggregated.columns
+    ]
+    aggregated.index.name = "kst_dtm"
+    return aggregated
+
+
+def build_residual_features(data_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    gfs_columns = ["forecast_kst_dtm", "grid_id"]
+    gfs_columns.extend(
+        column for pair in GFS_WIND_PAIRS.values() for column in pair
+    )
+    gfs = pd.read_csv(
+        data_dir / "train" / "gfs_train.csv",
+        usecols=gfs_columns,
+        encoding="utf-8-sig",
+    )
+    gfs["forecast_kst_dtm"] = pd.to_datetime(gfs["forecast_kst_dtm"])
+    gfs_grid_counts = gfs.groupby("forecast_kst_dtm")["grid_id"].nunique()
+    if gfs_grid_counts.min() != 9 or gfs_grid_counts.max() != 9:
+        raise ValueError("GFS residual feature는 예보시각마다 9개 격자가 필요합니다.")
+    gfs_values: list[str] = []
+    for feature, (u_column, v_column) in GFS_WIND_PAIRS.items():
+        speed_column = f"derived_{feature}_speed"
+        gfs[speed_column] = np.hypot(gfs[u_column], gfs[v_column])
+        gfs_values.extend([u_column, v_column, speed_column])
+    gfs_features = aggregate_spatial_features(
+        gfs,
+        gfs_values,
+        ["mean", "std", "min", "max"],
+        "gfs_wind",
+    )
+
+    ldaps_columns = ["forecast_kst_dtm", "grid_id", *LDAPS_NONWIND_COLUMNS]
+    ldaps_nonwind = pd.read_csv(
+        data_dir / "train" / "ldaps_train.csv",
+        usecols=ldaps_columns,
+        encoding="utf-8-sig",
+    )
+    ldaps_nonwind["forecast_kst_dtm"] = pd.to_datetime(
+        ldaps_nonwind["forecast_kst_dtm"]
+    )
+    ldaps_grid_counts = ldaps_nonwind.groupby("forecast_kst_dtm")[
+        "grid_id"
+    ].nunique()
+    if ldaps_grid_counts.min() != 16 or ldaps_grid_counts.max() != 16:
+        raise ValueError("LDAPS residual feature는 예보시각마다 16개 격자가 필요합니다.")
+    ldaps_features = aggregate_spatial_features(
+        ldaps_nonwind,
+        LDAPS_NONWIND_COLUMNS,
+        ["mean", "std"],
+        "ldaps_nonwind",
+    )
+    features = gfs_features.join(ldaps_features, how="inner")
+    features = features.replace([np.inf, -np.inf], np.nan).sort_index()
+    manifest_rows = [
+        {
+            "family": "GFS 풍속 공간 통계",
+            "source": "gfs_train.csv",
+            "feature_count": len(gfs_features.columns),
+            "description": "7개 풍속층 U/V/speed의 9개 격자 mean/std/min/max",
+        },
+        {
+            "family": "LDAPS 비풍속 공간 통계",
+            "source": "ldaps_train.csv",
+            "feature_count": len(ldaps_features.columns),
+            "description": "20개 비풍속 변수의 16개 격자 mean/std",
+        },
+    ]
+    manifest = pd.DataFrame(manifest_rows)
+    if len(features.columns) != 124:
+        raise ValueError(f"residual feature 수가 124개가 아닙니다: {len(features.columns)}")
+    return features, manifest
+
+
 def make_inner_folds(valid_index: pd.DatetimeIndex) -> list[tuple[pd.DatetimeIndex, pd.DatetimeIndex]]:
     years_for_index = interval_year(valid_index)
     years = sorted(set(years_for_index.tolist()))
@@ -418,6 +539,26 @@ def model_parameters(n_jobs: int, n_estimators: int) -> dict[str, object]:
     }
 
 
+def residual_model_parameters(n_jobs: int, n_estimators: int) -> dict[str, object]:
+    return {
+        "objective": "regression_l1",
+        "learning_rate": 0.03,
+        "n_estimators": int(n_estimators),
+        "num_leaves": 15,
+        "max_depth": 4,
+        "min_child_samples": 250,
+        "subsample": 1.0,
+        "colsample_bytree": 1.0,
+        "reg_alpha": 2.0,
+        "reg_lambda": 20.0,
+        "random_state": RANDOM_SEED,
+        "n_jobs": n_jobs,
+        "verbosity": -1,
+        "deterministic": True,
+        "force_col_wise": True,
+    }
+
+
 def estimate_best_iteration(
     features: pd.DataFrame,
     target: pd.Series,
@@ -428,6 +569,35 @@ def estimate_best_iteration(
     for train_index, validation_index in make_inner_folds(valid_index):
         model = LGBMRegressor(
             **model_parameters(args.n_jobs, args.max_rounds)
+        )
+        model.fit(
+            features.loc[train_index],
+            target.loc[train_index],
+            eval_X=features.loc[validation_index],
+            eval_y=target.loc[validation_index],
+            eval_metric="l1",
+            callbacks=[
+                lgb.early_stopping(
+                    args.early_stopping_rounds, verbose=False
+                )
+            ],
+        )
+        best = int(model.best_iteration_ or args.max_rounds)
+        iterations.append(max(1, min(best, args.max_rounds)))
+    median_iteration = int(np.rint(np.median(iterations)))
+    return max(1, median_iteration), iterations
+
+
+def estimate_residual_iteration(
+    features: pd.DataFrame,
+    target: pd.Series,
+    valid_index: pd.DatetimeIndex,
+    args: argparse.Namespace,
+) -> tuple[int, list[int]]:
+    iterations: list[int] = []
+    for train_index, validation_index in make_inner_folds(valid_index):
+        model = LGBMRegressor(
+            **residual_model_parameters(args.n_jobs, args.max_rounds)
         )
         model.fit(
             features.loc[train_index],
@@ -474,6 +644,53 @@ def train_outer_model(
     prediction = model.predict(features.loc[validation_index])
     prediction = np.clip(prediction, 0.0, capacity_kwh)
     return prediction, best_iteration, inner_iterations, len(valid_train_index)
+
+
+def crossfit_turbine_prediction(
+    features: pd.DataFrame,
+    target: pd.Series,
+    folds: list[tuple[pd.DatetimeIndex, pd.DatetimeIndex]],
+    best_iteration: int,
+    capacity_kwh: float,
+    args: argparse.Namespace,
+) -> pd.Series:
+    target = target.reindex(features.index)
+    prediction = pd.Series(np.nan, index=features.index, dtype=float)
+    for train_index, validation_index in folds:
+        valid_train = train_index[target.reindex(train_index).notna().to_numpy()]
+        if len(valid_train) < 1000:
+            raise ValueError("base cross-fit 터빈 학습 표본이 1,000개 미만입니다.")
+        model = LGBMRegressor(
+            **model_parameters(args.n_jobs, best_iteration)
+        )
+        model.fit(features.loc[valid_train], target.loc[valid_train])
+        prediction.loc[validation_index] = np.clip(
+            model.predict(features.loc[validation_index]), 0.0, capacity_kwh
+        )
+    covered_index = pd.DatetimeIndex(
+        np.concatenate([validation for _, validation in folds])
+    )
+    if prediction.reindex(covered_index).isna().any():
+        raise ValueError("base cross-fit prediction에 결측이 있습니다.")
+    return prediction.reindex(covered_index)
+
+
+def train_residual_model(
+    features: pd.DataFrame,
+    target: pd.Series,
+    train_index: pd.DatetimeIndex,
+    validation_index: pd.DatetimeIndex,
+    args: argparse.Namespace,
+) -> tuple[np.ndarray, int, list[int]]:
+    best_iteration, inner_iterations = estimate_residual_iteration(
+        features, target, train_index, args
+    )
+    model = LGBMRegressor(
+        **residual_model_parameters(args.n_jobs, best_iteration)
+    )
+    model.fit(features.loc[train_index], target.loc[train_index])
+    correction = model.predict(features.loc[validation_index])
+    return correction, best_iteration, inner_iterations
 
 
 def group_metric(
@@ -580,6 +797,31 @@ def score_chart(metrics: pd.DataFrame) -> str:
     return "".join(elements)
 
 
+def residual_score_chart(metrics: pd.DataFrame) -> str:
+    overall = metrics[metrics["scope"].eq("overall")].set_index("variant")
+    variants = ["candidate_raw", "candidate_residual"]
+    colors = {"candidate_raw": "#64748b", "candidate_residual": "#0f766e"}
+    labels = {"candidate_raw": "Candidate raw", "candidate_residual": "Residual 보정"}
+    elements = [
+        '<svg viewBox="0 0 760 230" role="img" aria-label="Residual OOF 점수 비교">',
+        '<line x1="90" y1="190" x2="730" y2="190" stroke="#cbd5e1"/>',
+    ]
+    for index, variant in enumerate(variants):
+        score = float(overall.loc[variant, "score"])
+        x = 180 + index * 310
+        bar_height = max(1.0, score * 160.0)
+        y = 190.0 - bar_height
+        elements.extend(
+            [
+                f'<rect x="{x}" y="{y:.1f}" width="150" height="{bar_height:.1f}" fill="{colors[variant]}"/>',
+                f'<text x="{x + 75}" y="{y - 10:.1f}" text-anchor="middle" font-size="22" font-weight="700">{score:.6f}</text>',
+                f'<text x="{x + 75}" y="216" text-anchor="middle" font-size="14">{labels[variant]}</text>',
+            ]
+        )
+    elements.append("</svg>")
+    return "".join(elements)
+
+
 def render_table(frame: pd.DataFrame, columns: list[str], labels: list[str]) -> str:
     header = "".join(f"<th>{html.escape(label)}</th>" for label in labels)
     rows = []
@@ -665,23 +907,96 @@ code{{background:#eef2f6;padding:2px 5px;border-radius:3px}} .method{{border-lef
     path.write_text(document, encoding="utf-8")
 
 
+def write_residual_dashboard(
+    path: Path,
+    metrics: pd.DataFrame,
+    details: pd.DataFrame,
+    manifest: pd.DataFrame,
+    audit: pd.DataFrame,
+    shutdown: pd.DataFrame,
+    args: argparse.Namespace,
+) -> None:
+    overall = metrics[metrics["scope"].eq("overall")].set_index("variant")
+    raw_score = float(overall.loc["candidate_raw", "score"])
+    residual_score = float(overall.loc["candidate_residual", "score"])
+    delta = residual_score - raw_score
+    label_map = {
+        "candidate_raw": "Candidate raw",
+        "candidate_residual": "Residual 보정",
+    }
+    group_metrics = metrics[metrics["scope"].eq("group")].copy()
+    group_metrics["variant"] = group_metrics["variant"].map(label_map)
+    year_metrics = metrics[metrics["scope"].eq("group_year")].copy()
+    year_metrics["variant"] = year_metrics["variant"].map(label_map)
+    shutdown_rows = []
+    for group in TARGET_GROUPS:
+        for year, values in shutdown[group].groupby(interval_year(shutdown.index)):
+            if int(year) in (2022, 2023, 2024):
+                shutdown_rows.append(
+                    {"group": group, "year": int(year), "hours": int(values.sum())}
+                )
+    shutdown_table = pd.DataFrame(shutdown_rows)
+    residual_parameters = residual_model_parameters(args.n_jobs, args.max_rounds)
+    parameter_text = ", ".join(
+        f"{key}={value}"
+        for key, value in residual_parameters.items()
+        if key not in {"n_jobs", "verbosity", "force_col_wise", "deterministic"}
+    )
+    document = f"""<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>미사용 기상 feature Residual OOF</title>
+<style>
+body{{margin:0;background:#f8fafc;color:#172033;font-family:Arial,'Malgun Gothic',sans-serif}}
+main{{max-width:1180px;margin:auto;padding:32px 28px 64px}} h1{{font-size:30px;margin:0 0 8px}} h2{{font-size:21px;margin:34px 0 12px}}
+p{{line-height:1.65;color:#475569}} .metrics{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:22px 0}}
+.metric{{background:white;border:1px solid #dbe3ec;border-radius:6px;padding:16px}} .metric span{{display:block;color:#64748b;font-size:13px}}
+.metric strong{{display:block;font-size:25px;margin-top:7px}} .positive{{color:#0f766e}} .negative{{color:#b42318}}
+.panel{{background:white;border:1px solid #dbe3ec;border-radius:6px;padding:18px;margin-top:12px;overflow:auto}}
+table{{border-collapse:collapse;width:100%;font-size:12px}} th,td{{border-bottom:1px solid #e2e8f0;padding:8px;text-align:right;white-space:nowrap}}
+th:first-child,td:first-child{{text-align:left}} th{{background:#f1f5f9;color:#334155;position:sticky;top:0}}
+code{{background:#eef2f6;padding:2px 5px;border-radius:3px}} .method{{border-left:4px solid #0f766e;padding:10px 14px;background:#ecfdf5;color:#334155}}
+</style></head><body><main>
+<h1>미사용 기상 feature Residual OOF</h1>
+<p>Candidate 터빈별 LGBM을 base로 고정하고, base가 보지 않은 GFS 풍속 공간장과 LDAPS 비풍속 공간장만으로 group residual을 보정했습니다.</p>
+<div class="metrics">
+<div class="metric"><span>Candidate raw</span><strong>{raw_score:.6f}</strong></div>
+<div class="metric"><span>Residual 보정</span><strong>{residual_score:.6f}</strong></div>
+<div class="metric"><span>Residual - Raw</span><strong class="{'positive' if delta >= 0 else 'negative'}">{delta:+.6f}</strong></div>
+</div>
+<div class="panel">{residual_score_chart(metrics)}</div>
+<h2>검증 계약</h2>
+<div class="method">각 outer-train 내부에서 Candidate base를 다시 cross-fit하여 <code>공식 group label - cross-fit base</code> residual target을 만들었습니다. residual model과 feature 선택 과정은 outer-validation label을 보지 않습니다. 최종식은 <code>clip(base + correction, 0, group capacity)</code>이며 Isotonic과 correction alpha 탐색은 사용하지 않았습니다.</div>
+<p>Residual 공유 하파: <code>{html.escape(parameter_text)}</code>. group별 epoch는 outer-train 내부 blocked validation의 중앙값입니다.</p>
+<h2>Residual feature 계약</h2><div class="panel">{render_table(manifest, ['family','source','feature_count','description'], ['feature군','원본','개수','정의'])}</div>
+<h2>그룹별 pooled OOF</h2><div class="panel">{render_table(group_metrics, ['variant','group','score','nmae','ficr','evaluated_rows'], ['모델','그룹','점수','NMAE','FiCR','평가 행'])}</div>
+<h2>그룹·연도별 안정성</h2><div class="panel">{render_table(year_metrics, ['variant','group','year','score','nmae','ficr'], ['모델','그룹','연도','점수','NMAE','FiCR'])}</div>
+<h2>Outer fold별 base mapping과 residual epoch</h2><div class="panel">{render_table(details, ['validation_year','turbine_id','feature','grid_id','base_best_iteration','residual_best_iteration','residual_inner_iterations','base_train_rows'], ['검증연도','터빈','Base feature','격자','Base epoch','Residual epoch','Residual inner epoch','Base 학습 행'])}</div>
+<h2>SCADA target 품질</h2><div class="panel">{render_table(audit, ['turbine_id','invalid_power_10m_rows','valid_hourly_target_rows','valid_hourly_wind_rows'], ['터빈','제외한 10분 power','유효 시간 target','유효 시간 wind'])}</div>
+<h2>그룹 운영정지 제외 현황</h2><div class="panel">{render_table(shutdown_table, ['group','year','hours'], ['그룹','연도','학습 제외 시간'])}</div>
+</main></body></html>"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(document, encoding="utf-8")
+
+
 def validate_outputs(
-    oof: pd.DataFrame, metrics: pd.DataFrame, mappings: pd.DataFrame
+    oof: pd.DataFrame,
+    metrics: pd.DataFrame,
+    mappings: pd.DataFrame,
+    expected_variants: set[str],
+    expected_mapping_rows: int,
 ) -> None:
     if oof[["variant", "group", "kst_dtm"]].duplicated().any():
         raise ValueError("OOF variant-group-time 키가 중복되었습니다.")
     if oof[["actual", "prediction"]].isna().any().any():
         raise ValueError("OOF actual 또는 prediction에 결측이 있습니다.")
     counts = oof.groupby("variant").size()
-    if len(counts) != 2 or counts.nunique() != 1:
-        raise ValueError("Baseline과 Candidate OOF 행 수가 다릅니다.")
+    if set(counts.index) != expected_variants or counts.nunique() != 1:
+        raise ValueError("비교 variant의 OOF 행 수가 다릅니다.")
     overall = metrics[metrics["scope"].eq("overall")]
-    if set(overall["variant"]) != {"baseline", "candidate"}:
-        raise ValueError("두 variant의 전체 metric이 필요합니다.")
-    expected_mappings = 2 * (12 * 3 + 5 * 2)
-    if len(mappings) != expected_mappings:
+    if set(overall["variant"]) != expected_variants:
+        raise ValueError("모든 비교 variant의 전체 metric이 필요합니다.")
+    if len(mappings) != expected_mapping_rows:
         raise ValueError(
-            f"mapping 행 수가 예상과 다릅니다: {len(mappings)} != {expected_mappings}"
+            f"mapping 행 수가 예상과 다릅니다: {len(mappings)} != {expected_mapping_rows}"
         )
 
 
@@ -808,7 +1123,13 @@ def run(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFr
     mappings = pd.DataFrame(mapping_rows).sort_values(
         ["variant", "validation_year", "turbine_id"]
     )
-    validate_outputs(oof, metrics, mappings)
+    validate_outputs(
+        oof,
+        metrics,
+        mappings,
+        {"baseline", "candidate"},
+        2 * (12 * 3 + 5 * 2),
+    )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     write_csv(oof, args.output_dir / "oof_predictions.csv")
     write_csv(metrics, args.output_dir / "oof_metrics.csv")
@@ -824,9 +1145,181 @@ def run(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFr
     return oof, metrics, mappings
 
 
+def run_residual(
+    args: argparse.Namespace,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    metadata = load_metadata(args.data_dir / "info.xlsx")
+    labels = pd.read_csv(
+        args.data_dir / "train" / "train_labels.csv",
+        encoding="utf-8-sig",
+        parse_dates=["kst_dtm"],
+    ).set_index("kst_dtm")
+    ldaps, speed_matrices = load_ldaps(
+        args.data_dir / "train" / "ldaps_train.csv"
+    )
+    residual_features, residual_manifest = build_residual_features(args.data_dir)
+    targets, winds, shutdown, audit = load_scada(args.data_dir, metadata)
+    feature_cache: dict[tuple[str, int], pd.DataFrame] = {}
+
+    def get_features(feature: str, grid_id: int) -> pd.DataFrame:
+        key = (feature, int(grid_id))
+        if key not in feature_cache:
+            feature_cache[key] = build_features(ldaps, feature, int(grid_id))
+        return feature_cache[key]
+
+    prediction_rows: list[pd.DataFrame] = []
+    detail_rows: list[dict[str, object]] = []
+    for group in TARGET_GROUPS:
+        group_metadata = metadata[metadata["group"].eq(group)].copy()
+        validation_years = sorted(
+            interval_year(labels.index[labels[group].notna()]).unique().tolist()
+        )
+        for validation_year in validation_years:
+            train_years = [year for year in validation_years if year != validation_year]
+            validation_index = labels.index[
+                (interval_year(labels.index) == validation_year) & labels[group].notna()
+            ]
+            train_index = labels.index[
+                interval_year(labels.index).isin(train_years) & labels[group].notna()
+            ]
+            train_index = train_index[
+                ~shutdown[group].reindex(train_index, fill_value=False).to_numpy(bool)
+            ]
+            train_index = train_index.intersection(residual_features.index)
+            validation_index = validation_index.intersection(residual_features.index)
+            crossfit_folds = make_inner_folds(train_index)
+            candidate_mapping = {
+                turbine: select_candidate_mapping(
+                    turbine, train_years, winds, speed_matrices
+                )
+                for turbine in group_metadata["turbine_id"]
+            }
+            print(
+                f"[residual {group} / {validation_year}] train={train_years}, "
+                f"calibration_rows={len(train_index)}, validation_rows={len(validation_index)}",
+                flush=True,
+            )
+            outer_base = np.zeros(len(validation_index), dtype=float)
+            crossfit_base = pd.Series(0.0, index=train_index)
+            fold_details: list[dict[str, object]] = []
+            for turbine_row in group_metadata.itertuples(index=False):
+                turbine = turbine_row.turbine_id
+                selection = candidate_mapping[turbine]
+                feature = str(selection["feature"])
+                grid_id = int(selection["grid_id"])
+                features = get_features(feature, grid_id)
+                capacity_kwh = float(turbine_row.capacity_mw) * 1000.0
+                prediction, best_iteration, inner_iterations, base_train_rows = (
+                    train_outer_model(
+                        features,
+                        targets[turbine],
+                        shutdown[group],
+                        train_years,
+                        validation_index,
+                        capacity_kwh,
+                        args,
+                    )
+                )
+                outer_base += prediction
+                turbine_crossfit = crossfit_turbine_prediction(
+                    features,
+                    targets[turbine],
+                    crossfit_folds,
+                    best_iteration,
+                    capacity_kwh,
+                    args,
+                )
+                crossfit_base += turbine_crossfit.reindex(train_index)
+                fold_details.append(
+                    {
+                        "group": group,
+                        "validation_year": validation_year,
+                        "train_years": "|".join(map(str, train_years)),
+                        "turbine_id": turbine,
+                        "feature": feature,
+                        "grid_id": grid_id,
+                        "mapping_l3_ms": float(selection["mapping_l3_ms"]),
+                        "mapping_overlap": int(selection["mapping_overlap"]),
+                        "base_best_iteration": best_iteration,
+                        "base_inner_iterations": "|".join(map(str, inner_iterations)),
+                        "base_train_rows": base_train_rows,
+                    }
+                )
+            outer_base = np.clip(outer_base, 0.0, GROUP_CAPACITY_KWH[group])
+            crossfit_base = crossfit_base.clip(0.0, GROUP_CAPACITY_KWH[group])
+            residual_target = (
+                labels[group].reindex(train_index).astype(float) - crossfit_base
+            )
+            correction, residual_best, residual_inner = train_residual_model(
+                residual_features,
+                residual_target,
+                train_index,
+                validation_index,
+                args,
+            )
+            corrected = np.clip(
+                outer_base + correction, 0.0, GROUP_CAPACITY_KWH[group]
+            )
+            actual = labels.loc[validation_index, group].to_numpy(float)
+            for variant, prediction in [
+                ("candidate_raw", outer_base),
+                ("candidate_residual", corrected),
+            ]:
+                prediction_rows.append(
+                    pd.DataFrame(
+                        {
+                            "variant": variant,
+                            "group": group,
+                            "validation_year": validation_year,
+                            "kst_dtm": validation_index,
+                            "actual": actual,
+                            "prediction": prediction,
+                        }
+                    )
+                )
+            for row in fold_details:
+                row["residual_best_iteration"] = residual_best
+                row["residual_inner_iterations"] = "|".join(
+                    map(str, residual_inner)
+                )
+                row["residual_feature_count"] = len(residual_features.columns)
+                row["residual_train_rows"] = len(train_index)
+                detail_rows.append(row)
+
+    oof = pd.concat(prediction_rows, ignore_index=True)
+    metrics = build_metrics(oof)
+    details = pd.DataFrame(detail_rows).sort_values(
+        ["validation_year", "turbine_id"]
+    )
+    validate_outputs(
+        oof,
+        metrics,
+        details,
+        {"candidate_raw", "candidate_residual"},
+        12 * 3 + 5 * 2,
+    )
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    write_csv(oof, args.output_dir / "oof_predictions.csv")
+    write_csv(metrics, args.output_dir / "oof_metrics.csv")
+    write_csv(details, args.output_dir / "feature_mappings.csv")
+    write_residual_dashboard(
+        args.output_dir / "dashboard.html",
+        metrics,
+        details,
+        residual_manifest,
+        audit,
+        shutdown,
+        args,
+    )
+    return oof, metrics, details
+
+
 def main() -> None:
     args = parse_args()
-    _, metrics, _ = run(args)
+    if args.mode == "wind-ablation":
+        _, metrics, _ = run(args)
+    else:
+        _, metrics, _ = run_residual(args)
     overall = metrics[metrics["scope"].eq("overall")][
         ["variant", "score", "nmae", "ficr"]
     ]
