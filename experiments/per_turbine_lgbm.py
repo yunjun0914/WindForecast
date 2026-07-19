@@ -56,6 +56,11 @@ def write_csv(frame: pd.DataFrame, path: Path) -> None:
     frame.to_csv(path, index=False, encoding="utf-8-sig")
 
 
+def interval_year(index: pd.DatetimeIndex) -> pd.Index:
+    """Map an interval-ending timestamp to the year containing that interval."""
+    return (index - pd.Timedelta(nanoseconds=1)).year
+
+
 def dms_to_decimal(value: object) -> tuple[float, float]:
     match = re.search(
         r"(\d+)[^\d]+(\d+)[^\d]+([\d.]+)\"?([NS])\s+"
@@ -317,7 +322,7 @@ def mapping_l3(
     train_years: list[int],
 ) -> tuple[float, int]:
     common = matrix.index.intersection(wind.index)
-    selected = common[common.year.isin(train_years)]
+    selected = common[interval_year(common).isin(train_years)]
     actual = wind.reindex(selected).to_numpy(float)
     forecast = matrix.loc[selected, grid_id].to_numpy(float)
     valid = np.isfinite(actual) & np.isfinite(forecast)
@@ -374,12 +379,13 @@ def build_features(
 
 
 def make_inner_folds(valid_index: pd.DatetimeIndex) -> list[tuple[pd.DatetimeIndex, pd.DatetimeIndex]]:
-    years = sorted(set(valid_index.year.tolist()))
+    years_for_index = interval_year(valid_index)
+    years = sorted(set(years_for_index.tolist()))
     folds: list[tuple[pd.DatetimeIndex, pd.DatetimeIndex]] = []
     if len(years) >= 2:
         for validation_year in years:
-            validation = valid_index[valid_index.year == validation_year]
-            train = valid_index[valid_index.year != validation_year]
+            validation = valid_index[years_for_index == validation_year]
+            train = valid_index[years_for_index != validation_year]
             folds.append((train, validation))
     else:
         ordered = valid_index.sort_values()
@@ -452,7 +458,7 @@ def train_outer_model(
     target = target.reindex(features.index)
     shutdown = group_shutdown.reindex(features.index, fill_value=False)
     train_mask = (
-        features.index.year.isin(train_years)
+        interval_year(features.index).isin(train_years)
         & target.notna().to_numpy()
         & ~shutdown.to_numpy(bool)
     )
@@ -611,7 +617,7 @@ def write_dashboard(
     candidate_mappings = mappings[mappings["variant"].eq("candidate")].copy()
     shutdown_rows = []
     for group in TARGET_GROUPS:
-        for year, values in shutdown[group].groupby(shutdown.index.year):
+        for year, values in shutdown[group].groupby(interval_year(shutdown.index)):
             if int(year) in (2022, 2023, 2024):
                 shutdown_rows.append(
                     {"group": group, "year": int(year), "hours": int(values.sum())}
@@ -704,12 +710,12 @@ def run(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFr
     for group in TARGET_GROUPS:
         group_metadata = metadata[metadata["group"].eq(group)].copy()
         validation_years = sorted(
-            labels.index[labels[group].notna()].year.unique().tolist()
+            interval_year(labels.index[labels[group].notna()]).unique().tolist()
         )
         for validation_year in validation_years:
             train_years = [year for year in validation_years if year != validation_year]
             validation_index = labels.index[
-                (labels.index.year == validation_year) & labels[group].notna()
+                (interval_year(labels.index) == validation_year) & labels[group].notna()
             ]
             candidate_mapping = {
                 turbine: select_candidate_mapping(
@@ -775,7 +781,9 @@ def run(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFr
                                 audit_row["valid_hourly_target_rows"]
                             ),
                             "group_shutdown_hours": int(
-                                shutdown.loc[shutdown.index.year.isin(train_years), group].sum()
+                                shutdown.loc[
+                                    interval_year(shutdown.index).isin(train_years), group
+                                ].sum()
                             ),
                         }
                     )
