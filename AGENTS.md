@@ -8,6 +8,7 @@
 2. `docs/best_model_usage.md` (과거 모델 기록)
 3. `docs/rules.md`
 4. `docs/exp_logs.md` 최근 항목
+5. `docs/validation_protocol_fixed_epoch.md`
 
 ## Current Best Model
 
@@ -53,6 +54,16 @@ final_floor     = 0.10 * capacity
 - 임의로 실험을 계속 이어서 결론짓지 않는다. 다음 실험으로 넘어가기 전에 사용자와 확인한다.
 - 기존 파일을 정리하거나 삭제하기 전에는 사용자 의도를 확인한다.
 - teacher-style feature에서 LGBM teacher를 다시 쓰지 않는다. 사용자가 명시적으로 허락하지 않으면 RF OOB, empirical table, 단순 회귀 같은 가벼운 방식만 쓴다.
+
+## Validation Rules
+
+- 현재 기본 규칙은 `docs/validation_protocol_fixed_epoch.md`다.
+- Validation으로 모든 fold가 공유할 하나의 하이퍼파라미터 세트를 선택한다.
+- 선택된 하이퍼파라미터로 각 fold의 best epoch를 측정하고 그 중앙값을 최종 공통 epoch로 고정한다.
+- 중앙값 epoch가 정해지면 모든 outer fold를 동일한 하이퍼파라미터와 동일한 epoch로 다시 학습해 fixed-epoch OOF를 계산한다.
+- fold별 best checkpoint를 최종 OOF 예측이나 submission에 직접 사용하지 않는다.
+- Submission은 모든 사용 가능한 학습 연도를 합쳐 공통 하이퍼파라미터와 중앙값 epoch로 새 모델을 학습해 만든다.
+- 과거 `docs/validation_protocol_non_nested.md`의 fold-best checkpoint 및 fold-model 평균 방식은 재현용 기록일 뿐 현재 규칙이 아니다.
 
 ## Competition Rules
 

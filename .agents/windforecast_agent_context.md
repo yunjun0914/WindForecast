@@ -105,3 +105,5 @@ Key transition:
 4. Do not use LGBM teacher training for teacher-style features unless the user explicitly re-approves it.
 5. Report OOF and public results separately and always include exact file names.
 6. Use `docs/rules.md` as the source of truth for competition rule decisions.
+7. Use `docs/validation_protocol_fixed_epoch.md` as the current validation protocol: select one shared hyperparameter set, take the median of fold-best epochs, and rerun every outer fold with that fixed epoch.
+8. Train submission models again on all available training years with the shared hyperparameters and median epoch; do not average fold-best checkpoints unless the user explicitly approves a separate ensemble.

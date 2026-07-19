@@ -1,5 +1,7 @@
 # WindForecast validation protocol: non-nested fold-best OOF
 
+> **과거 규칙:** 이 문서는 2026-07-19에 `docs/validation_protocol_fixed_epoch.md`로 대체되었다. 아래 내용은 기존 fold-best 실험 재현용이며 새 실험의 기본 검증 규칙으로 사용하지 않는다.
+
 User-confirmed protocol, 2026-07-18 KST.
 
 ## Required behavior

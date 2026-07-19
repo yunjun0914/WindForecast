@@ -4,6 +4,8 @@
 
 > 2026-07-10 note: SCADA LGBM teacher retraining has been removed from executable paths. Historical `lgbm_time_oof` mentions below are legacy result names or old logs, not commands to rerun.
 
+> 2026-07-19 validation rule: 공통 하이퍼파라미터와 fold별 best epoch 중앙값을 확정한 뒤 fixed-epoch OOF를 다시 계산한다. Submission은 fold checkpoint 평균이 아니라 모든 사용 가능한 연도를 같은 설정으로 재학습한다. 기준 문서는 `docs/validation_protocol_fixed_epoch.md`다.
+
 ## Log Entries
 
 ### 2026-07-11 KST - TREE quota65 q65/max3 upper lift
