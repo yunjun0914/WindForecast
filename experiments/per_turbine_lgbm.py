@@ -10,6 +10,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from lightgbm import LGBMRegressor
+from scipy.stats import kendalltau, spearmanr
 from sklearn.isotonic import IsotonicRegression
 
 
@@ -35,6 +36,7 @@ SHUTDOWN_WIND_MS = 5.0
 SHUTDOWN_POWER_RATIO = 0.01
 SHUTDOWN_OTHER_RATIO = 0.10
 RANDOM_SEED = 20260719
+ISOTONIC_ALPHA_GRID = (0.0, 0.25, 0.5, 0.75, 1.0)
 GFS_WIND_PAIRS = {
     "10m": ("heightAboveGround_10_10u", "heightAboveGround_10_10v"),
     "80m": ("heightAboveGround_80_u", "heightAboveGround_80_v"),
@@ -715,6 +717,174 @@ def group_metric(
     }
 
 
+def fit_isotonic_curve(
+    prediction: pd.Series,
+    actual: pd.Series,
+    train_index: pd.DatetimeIndex,
+    capacity: float,
+) -> IsotonicRegression:
+    train_prediction = prediction.reindex(train_index).astype(float)
+    train_actual = actual.reindex(train_index).astype(float)
+    valid = train_prediction.notna() & train_actual.notna()
+    if int(valid.sum()) < 1000:
+        raise ValueError("Isotonic 학습 표본이 1,000개 미만입니다.")
+    calibrator = IsotonicRegression(
+        increasing=True,
+        y_min=0.0,
+        y_max=capacity,
+        out_of_bounds="clip",
+    )
+    calibrator.fit(
+        train_prediction.loc[valid].to_numpy(float),
+        train_actual.loc[valid].to_numpy(float),
+    )
+    return calibrator
+
+
+def metric_aware_isotonic(
+    crossfit_prediction: pd.Series,
+    actual: pd.Series,
+    train_index: pd.DatetimeIndex,
+    outer_prediction: np.ndarray,
+    capacity: float,
+) -> tuple[
+    np.ndarray,
+    IsotonicRegression,
+    float,
+    dict[float, dict[str, float | int]],
+]:
+    calibration_folds = make_inner_folds(train_index)
+    isotonic_oof = pd.Series(np.nan, index=train_index, dtype=float)
+    for calibration_train, calibration_validation in calibration_folds:
+        calibrator = fit_isotonic_curve(
+            crossfit_prediction,
+            actual,
+            calibration_train,
+            capacity,
+        )
+        validation_prediction = crossfit_prediction.reindex(
+            calibration_validation
+        ).astype(float)
+        if validation_prediction.isna().any():
+            raise ValueError("Isotonic calibration OOF 입력에 결측값이 있습니다.")
+        isotonic_oof.loc[calibration_validation] = calibrator.predict(
+            validation_prediction.to_numpy(float)
+        )
+    if isotonic_oof.isna().any():
+        raise ValueError("Isotonic calibration OOF가 모든 학습 행을 덮지 못했습니다.")
+
+    calibration_actual = actual.reindex(train_index).astype(float).to_numpy()
+    raw_oof = crossfit_prediction.reindex(train_index).astype(float).to_numpy()
+    isotonic_values = isotonic_oof.to_numpy(float)
+    alpha_metrics: dict[float, dict[str, float | int]] = {}
+    for alpha in ISOTONIC_ALPHA_GRID:
+        blended = raw_oof + alpha * (isotonic_values - raw_oof)
+        alpha_metrics[float(alpha)] = group_metric(
+            calibration_actual, blended, capacity
+        )
+    selected_alpha = max(
+        ISOTONIC_ALPHA_GRID,
+        key=lambda alpha: (
+            float(alpha_metrics[float(alpha)]["score"]),
+            -float(alpha),
+        ),
+    )
+
+    final_calibrator = fit_isotonic_curve(
+        crossfit_prediction,
+        actual,
+        train_index,
+        capacity,
+    )
+    isotonic_outer = final_calibrator.predict(np.asarray(outer_prediction, dtype=float))
+    calibrated_outer = outer_prediction + float(selected_alpha) * (
+        isotonic_outer - outer_prediction
+    )
+    return (
+        np.clip(calibrated_outer, 0.0, capacity),
+        final_calibrator,
+        float(selected_alpha),
+        alpha_metrics,
+    )
+
+
+def build_rank_diagnostics(
+    oof: pd.DataFrame,
+    raw_variant: str,
+    calibrated_variant: str,
+) -> pd.DataFrame:
+    selected = oof[oof["variant"].isin([raw_variant, calibrated_variant])]
+    wide = selected.pivot(
+        index=["group", "validation_year", "kst_dtm", "actual"],
+        columns="variant",
+        values="prediction",
+    ).reset_index()
+    rows: list[dict[str, object]] = []
+    scopes: list[tuple[str, pd.DataFrame]] = []
+    for group, group_frame in wide.groupby("group", sort=True):
+        scopes.append(("group", group_frame))
+        for year, year_frame in group_frame.groupby("validation_year", sort=True):
+            scopes.append(("group_year", year_frame))
+    for scope, frame in scopes:
+        group = str(frame["group"].iloc[0])
+        capacity = GROUP_CAPACITY_KWH[group]
+        valid = (
+            frame["actual"].notna()
+            & frame[raw_variant].notna()
+            & frame[calibrated_variant].notna()
+            & frame["actual"].ge(0.10 * capacity)
+        )
+        evaluated = frame.loc[valid]
+        actual = evaluated["actual"].to_numpy(float)
+        raw = evaluated[raw_variant].to_numpy(float)
+        calibrated = evaluated[calibrated_variant].to_numpy(float)
+        mapping = (
+            pd.DataFrame({"raw": raw, "calibrated": calibrated})
+            .groupby("raw", sort=True)["calibrated"]
+            .first()
+        )
+        inversion_steps = int(
+            np.sum(np.diff(mapping.to_numpy(float)) < -1e-9)
+        )
+        raw_unique = int(pd.Series(raw).nunique())
+        calibrated_unique = int(pd.Series(calibrated).nunique())
+        rows.append(
+            {
+                "scope": scope,
+                "group": group,
+                "year": (
+                    int(evaluated["validation_year"].iloc[0])
+                    if scope == "group_year"
+                    else np.nan
+                ),
+                "evaluated_rows": len(evaluated),
+                "raw_actual_spearman": float(spearmanr(raw, actual).statistic),
+                "calibrated_actual_spearman": float(
+                    spearmanr(calibrated, actual).statistic
+                ),
+                "raw_actual_kendall": float(kendalltau(raw, actual).statistic),
+                "calibrated_actual_kendall": float(
+                    kendalltau(calibrated, actual).statistic
+                ),
+                "raw_calibrated_spearman": float(
+                    spearmanr(raw, calibrated).statistic
+                ),
+                "raw_calibrated_kendall": float(
+                    kendalltau(raw, calibrated).statistic
+                ),
+                "raw_unique_predictions": raw_unique,
+                "calibrated_unique_predictions": calibrated_unique,
+                "unique_retention": (
+                    float(calibrated_unique / raw_unique) if raw_unique else np.nan
+                ),
+                "monotonic_inversion_steps": inversion_steps,
+            }
+        )
+    return pd.DataFrame(rows).sort_values(
+        ["scope", "group", "year"], na_position="first"
+    )
+
+
 def build_metrics(oof: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for variant, variant_frame in oof.groupby("variant", sort=True):
@@ -1010,6 +1180,7 @@ def write_isotonic_dashboard(
     path: Path,
     metrics: pd.DataFrame,
     details: pd.DataFrame,
+    rank_diagnostics: pd.DataFrame,
     audit: pd.DataFrame,
     shutdown: pd.DataFrame,
 ) -> None:
@@ -1032,6 +1203,13 @@ def write_isotonic_dashboard(
             "train_years",
             "isotonic_train_rows",
             "isotonic_knots",
+            "isotonic_alpha",
+            "isotonic_inner_score",
+            "isotonic_inner_nmae",
+            "isotonic_inner_ficr",
+            "isotonic_alpha_scores",
+            "isotonic_alpha_nmae",
+            "isotonic_alpha_ficr",
             "isotonic_x_min",
             "isotonic_x_max",
         ]
@@ -1066,10 +1244,11 @@ code{{background:#eef2f6;padding:2px 5px;border-radius:3px}} .method{{border-lef
 </div>
 <div class="panel">{isotonic_score_chart(metrics)}</div>
 <h2>검증 계약</h2>
-<div class="method">각 outer-train 내부의 터빈별 cross-fit 예측을 합산해 보정 학습 입력을 만들었습니다. Isotonic은 <code>cross-fit group prediction -&gt; official group label</code>만 학습하며 outer-validation label은 보지 않습니다. <code>increasing=True</code>, <code>out_of_bounds=clip</code>, 출력 범위는 그룹 용량으로 제한했습니다.</div>
+<div class="method">각 outer-train 내부의 터빈별 cross-fit 예측을 합산해 보정 학습 입력을 만들었습니다. 이 입력을 다시 calibration fold로 나누고 <code>raw + alpha × (isotonic - raw)</code>의 alpha를 NMAE와 6%·8% FiCR로 구성한 실제 점수로 선택했습니다. outer-validation label은 곡선 학습과 alpha 선택에 사용하지 않았습니다. 한 fold의 단조 곡선 안에서는 순위 역전이 없어야 하며, pooled group의 역전 수는 서로 다른 연도 fold의 곡선을 합칠 때 생긴 전역 rank drift입니다.</div>
 <h2>그룹별 pooled OOF</h2><div class="panel">{render_table(group_metrics, ['variant','group','score','nmae','ficr','evaluated_rows'], ['모델','그룹','점수','NMAE','FiCR','평가 행'])}</div>
 <h2>그룹·연도별 안정성</h2><div class="panel">{render_table(year_metrics, ['variant','group','year','score','nmae','ficr'], ['모델','그룹','연도','점수','NMAE','FiCR'])}</div>
-<h2>Outer fold별 Isotonic 곡선</h2><div class="panel">{render_table(calibration, ['group','validation_year','train_years','isotonic_train_rows','isotonic_knots','isotonic_x_min','isotonic_x_max'], ['그룹','검증연도','학습연도','보정 학습 행','knot 수','학습 예측 최솟값','학습 예측 최댓값'])}</div>
+<h2>Rank 진단</h2><div class="panel">{render_table(rank_diagnostics, ['scope','group','year','evaluated_rows','raw_actual_spearman','calibrated_actual_spearman','raw_actual_kendall','calibrated_actual_kendall','raw_calibrated_spearman','raw_calibrated_kendall','unique_retention','monotonic_inversion_steps'], ['범위','그룹','연도','평가 행','Raw-실제 Spearman','보정-실제 Spearman','Raw-실제 Kendall','보정-실제 Kendall','Raw-보정 Spearman','Raw-보정 Kendall','고유값 유지율','순위 역전 단계'])}</div>
+<h2>Outer fold별 Isotonic 선택</h2><div class="panel">{render_table(calibration, ['group','validation_year','train_years','isotonic_train_rows','isotonic_knots','isotonic_alpha','isotonic_inner_score','isotonic_inner_nmae','isotonic_inner_ficr','isotonic_alpha_scores','isotonic_alpha_nmae','isotonic_alpha_ficr','isotonic_x_min','isotonic_x_max'], ['그룹','검증연도','학습연도','보정 학습 행','knot 수','선택 alpha','inner OOF 점수','inner NMAE','inner FiCR','alpha별 점수','alpha별 NMAE','alpha별 FiCR','학습 예측 최솟값','학습 예측 최댓값'])}</div>
 <h2>Outer fold별 Candidate mapping과 epoch</h2><div class="panel">{render_table(details, ['validation_year','turbine_id','feature','grid_id','mapping_l3_ms','base_best_iteration','base_inner_iterations','base_train_rows'], ['검증연도','터빈','LDAPS feature','격자','학습구간 L3','Base epoch','Base inner epoch','Base 학습 행'])}</div>
 <h2>SCADA target 점검</h2><div class="panel">{render_table(audit, ['turbine_id','invalid_power_10m_rows','valid_hourly_target_rows','valid_hourly_wind_rows'], ['터빈','제외된 10분 power','유효 시간 target','유효 시간 wind'])}</div>
 <h2>그룹 운영정지 제외 현황</h2><div class="panel">{render_table(shutdown_table, ['group','year','hours'], ['그룹','연도','학습 제외 시간'])}</div>
@@ -1388,18 +1567,17 @@ def run_postprocess(
                 )
                 if int(calibration_valid.sum()) < 1000:
                     raise ValueError("Isotonic 학습 표본이 1,000개 미만입니다.")
-                calibrator = IsotonicRegression(
-                    increasing=True,
-                    y_min=0.0,
-                    y_max=GROUP_CAPACITY_KWH[group],
-                    out_of_bounds="clip",
-                )
                 calibration_x = crossfit_base.loc[calibration_valid].to_numpy(float)
-                calibration_y = calibration_actual.loc[calibration_valid].to_numpy(float)
-                calibrator.fit(calibration_x, calibration_y)
-                postprocessed = np.clip(
-                    calibrator.predict(outer_base),
-                    0.0,
+                (
+                    postprocessed,
+                    calibrator,
+                    selected_alpha,
+                    alpha_metrics,
+                ) = metric_aware_isotonic(
+                    crossfit_base,
+                    labels[group],
+                    train_index,
+                    outer_base,
                     GROUP_CAPACITY_KWH[group],
                 )
                 postprocessed_variant = "candidate_isotonic"
@@ -1431,6 +1609,23 @@ def run_postprocess(
                 else:
                     row["isotonic_train_rows"] = int(calibration_valid.sum())
                     row["isotonic_knots"] = len(calibrator.X_thresholds_)
+                    row["isotonic_alpha"] = selected_alpha
+                    selected_metric = alpha_metrics[selected_alpha]
+                    row["isotonic_inner_score"] = selected_metric["score"]
+                    row["isotonic_inner_nmae"] = selected_metric["nmae"]
+                    row["isotonic_inner_ficr"] = selected_metric["ficr"]
+                    row["isotonic_alpha_scores"] = "|".join(
+                        f"{alpha:.2f}:{float(alpha_metrics[alpha]['score']):.6f}"
+                        for alpha in ISOTONIC_ALPHA_GRID
+                    )
+                    row["isotonic_alpha_nmae"] = "|".join(
+                        f"{alpha:.2f}:{float(alpha_metrics[alpha]['nmae']):.6f}"
+                        for alpha in ISOTONIC_ALPHA_GRID
+                    )
+                    row["isotonic_alpha_ficr"] = "|".join(
+                        f"{alpha:.2f}:{float(alpha_metrics[alpha]['ficr']):.6f}"
+                        for alpha in ISOTONIC_ALPHA_GRID
+                    )
                     row["isotonic_x_min"] = float(calibration_x.min())
                     row["isotonic_x_max"] = float(calibration_x.max())
                 detail_rows.append(row)
@@ -1467,10 +1662,23 @@ def run_postprocess(
             args,
         )
     else:
+        rank_diagnostics = build_rank_diagnostics(
+            oof,
+            "candidate_raw",
+            "candidate_isotonic",
+        )
+        fold_rank = rank_diagnostics[rank_diagnostics["scope"].eq("group_year")]
+        if int(fold_rank["monotonic_inversion_steps"].sum()) != 0:
+            raise ValueError("단일 outer fold의 Isotonic 보정에서 순위 역전이 발생했습니다.")
+        write_csv(
+            rank_diagnostics,
+            args.output_dir / "rank_diagnostics.csv",
+        )
         write_isotonic_dashboard(
             args.output_dir / "dashboard.html",
             metrics,
             details,
+            rank_diagnostics,
             audit,
             shutdown,
         )
