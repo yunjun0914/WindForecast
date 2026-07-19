@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import copy
+import os
 
 import numpy as np
 import pandas as pd
+
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
 import torch
 from lightgbm import LGBMRegressor
 from scipy.stats import kendalltau, spearmanr
@@ -1083,6 +1087,9 @@ def main() -> None:
         raise ValueError(f"--power-epochs must be at least {proto.BAND_MIN_EPOCHS}")
     residual_rounds = int(getattr(args, "residual_rounds", 300))
     n_jobs = int(getattr(args, "n_jobs", -1))
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.use_deterministic_algorithms(True)
     args.results_dir.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(
