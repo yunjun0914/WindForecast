@@ -8,6 +8,45 @@
 
 ## Log Entries
 
+### 2026-07-20 KST - TCN1 cubic 격자·미사용 피처 residual·TCN2 Isotonic OOF
+
+목적: TCN1 격자 선택과 학습 손실을 cubic MAE로 일치시키고, TCN1이 사용하지 않은 터빈 위치 기반 local LDAPS/GFS 피처로 cube-space residual을 보정한 뒤 TCN2와 Isotonic 효과를 확인한다.
+
+검증:
+
+- 공통 하이퍼파라미터를 사용했다.
+- TCN1 fold별 best epoch는 `[5, 6, 4, 2, 4, 4, 8, 4]`, 중앙값 fixed epoch는 `4`다.
+- TCN2 fold별 best epoch는 `[16, 17, 37]`, 중앙값 fixed epoch는 `17`이다.
+- 모든 outer fold를 중앙값 epoch로 처음부터 다시 학습했다.
+- residual은 터빈별 LGBM 17개를 outer-year OOF로 학습했다.
+- Isotonic은 outer-train 내부 OOF에서 `alpha={0,0.25,0.5,0.75,1}`를 선택했다.
+- 실행 시간은 bear RTX 4080 deterministic CUDA 기준 약 76분이다.
+
+결과:
+
+| Variant | OOF score | nMAE | FiCR | 판단 |
+|---|---:|---:|---:|---|
+| TCN2 + raw TCN1 | `0.623738` | `0.140984` | `0.388459` | 기준 |
+| TCN2 + residual-corrected TCN1 | `0.623445` | `0.140471` | `0.387360` | 전체는 소폭 하락 |
+| residual TCN2 + metric-aware Isotonic | `0.623874` | `0.138655` | `0.386404` | 기준 대비 `+0.000136` |
+
+세부:
+
+- residual은 cubic MAE 기준 17개 터빈 중 11개를 개선했다.
+- G3 다섯 터빈은 모두 개선했고, G3 TCN2 score는 raw `0.591278`에서 residual `0.597810`, Isotonic `0.599099`로 상승했다.
+- G1/G2는 residual TCN2가 각각 `-0.005365`, `-0.002047` 하락했다.
+- Isotonic alpha는 G1/G2 `0`, G3 `0.25`였다.
+- Isotonic은 각 outer fold 안에서 raw 순위를 완전히 보존했다: raw-calibrated Spearman `1.0`, inversion `0`.
+- 사후 조합 `G1/G2 raw + G3 residual-Isotonic`은 `0.626345`지만 결과를 본 뒤 선택한 진단값이므로 정식 후보 점수로 취급하지 않는다.
+- submission은 만들지 않았다.
+
+산출물:
+
+- `results/tcn1_residual_fixed_full_v1_predictions.csv`
+- `results/tcn1_residual_fixed_full_v1_scores.csv`
+- `results/tcn1_residual_fixed_full_v1_wind_diagnostics.csv`
+- `results/tcn1_residual_fixed_full_v1_rank_diagnostics.csv`
+
 ### 2026-07-11 KST - TREE quota65 q65/max3 upper lift
 
 Purpose: compare quantile `q65` and causal-max3 target as one-sided upper branches for the TREE quota65 baseline.

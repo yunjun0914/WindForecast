@@ -1,5 +1,7 @@
 # 2026-07-18 - Global SCADA-wind to three-group TCN, non-nested fold-best OOF
 
+> 이 문서는 과거 fold-best 실험 재현 기록이다. 2026-07-20부터 같은 실행기 경로는 공통 하이퍼파라미터·중앙값 fixed epoch·full-data 재학습 규칙으로 전환되었다. 최신 결과는 `docs/exp_logs.md`의 2026-07-20 항목을 따른다.
+
 ## Purpose
 
 Replace the previous per-turbine power Stage2 with one joint group model:

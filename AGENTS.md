@@ -81,4 +81,14 @@ final_floor     = 0.10 * capacity
 conda run -n WindForecast python --version
 ```
 
+`bear` 서버의 재현 가능한 실행 환경:
+
+```bash
+/home/yunjun0914/WindForecast_env/bin/python --version
+```
+
+- Python `3.10.12`, PyTorch `2.6.0+cu124`, CUDA 사용 가능
+- `WindForecast_env`는 독립 venv이며 과거 micromamba 경로를 사용하지 않는다.
+- 서버 실험은 `/home/yunjun0914/windforecast_runs/<run_name>` 아래 격리 run directory에서 실행한다.
+
 긴 학습/추론을 실행하기 전에는 어떤 branch(PINN/TREE/TCN)를 건드리는지 사용자에게 먼저 말한다.
