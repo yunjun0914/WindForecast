@@ -169,6 +169,19 @@ def prefix_for_group(group: str) -> str:
     return f"g{TARGET_COLS.index(group) + 1}__"
 
 
+def build_site_static(ldaps: pd.DataFrame, gfs: pd.DataFrame) -> pd.DataFrame:
+    site_full = add_weather_time_features(
+        build_tree_features(ldaps, gfs, None, feature_profile=FEATURE_PROFILE_FULL_V2)
+    )
+    missing = [feature for feature in SITE_FEATURES if feature not in site_full]
+    if missing:
+        raise ValueError(f"Site features missing: {missing}")
+    output = site_full[TIME_KEY_COLS + SITE_FEATURES].copy()
+    for column in TIME_KEY_COLS:
+        output[column] = pd.to_datetime(output[column])
+    return output
+
+
 def build_fold_data(
     tables_by_group: dict[str, GroupTables],
     site_static: pd.DataFrame,
@@ -783,16 +796,7 @@ def main() -> None:
     print(f"device={device} smoke={args.smoke_test}", flush=True)
     ldaps, gfs, labels, scada_by_group = read_inputs()
     print("build deduplicated site inputs", flush=True)
-    site_full = add_weather_time_features(
-        build_tree_features(ldaps, gfs, None, feature_profile=FEATURE_PROFILE_FULL_V2)
-    )
-    missing_site = [feature for feature in SITE_FEATURES if feature not in site_full]
-    if missing_site:
-        raise ValueError(f"Site features missing: {missing_site}")
-    site_static = site_full[TIME_KEY_COLS + SITE_FEATURES].copy()
-    for column in TIME_KEY_COLS:
-        site_static[column] = pd.to_datetime(site_static[column])
-    del site_full
+    site_static = build_site_static(ldaps, gfs)
     tables_by_group = {}
     for group in TARGET_COLS:
         print(f"build group inputs: {group}", flush=True)

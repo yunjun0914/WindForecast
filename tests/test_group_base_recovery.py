@@ -1,7 +1,9 @@
 import numpy as np
 import pandas as pd
+import torch
 
 from experiments.evaluate_group_base_recovery_oof import CausalWindowDataset
+from experiments.evaluate_group_tcn_band_loss_oof import soft_band_objective
 
 
 def test_causal_window_does_not_cross_year_boundary():
@@ -44,3 +46,19 @@ def test_causal_window_can_drop_rows_without_observed_group():
         keep_observed=True,
     )
     assert dataset.indices.tolist() == [1, 2]
+
+
+def test_soft_band_objectives_reward_inside_band_prediction():
+    target = torch.full((3, 3), 0.50)
+    observed = torch.ones_like(target)
+    inside = target + 0.05
+    outside = target + 0.10
+    for mode in ("pure_band_ficr", "ficr_mae"):
+        inside_loss, _, inside_ficr = soft_band_objective(
+            inside, target, observed, mode, gamma=0.00682273
+        )
+        outside_loss, _, outside_ficr = soft_band_objective(
+            outside, target, observed, mode, gamma=0.00682273
+        )
+        assert float(inside_loss) < float(outside_loss)
+        assert float(inside_ficr) > float(outside_ficr)
