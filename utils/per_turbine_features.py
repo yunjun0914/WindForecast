@@ -53,6 +53,15 @@ LOCAL_TREE_FEATURES = [
     "wake_upstream_count",
 ]
 
+GROUP_WAKE_FEATURES = [
+    "wake_exposure_mean",
+    "wake_exposure_max",
+    "wake_exposure_std",
+    "wake_upstream_count_mean",
+    "wake_upstream_count_max",
+    "wake_upstream_count_std",
+]
+
 
 def _metadata_for_group(group: str) -> pd.DataFrame:
     meta = load_turbine_metadata()
@@ -220,6 +229,35 @@ def build_group_per_turbine_features(
         table["turbine_y_km"] = float(turbine["y_km"])
         parts.append(table)
     return pd.concat(parts, ignore_index=True)
+
+
+def build_group_wake_features(
+    ldaps: pd.DataFrame,
+    gfs: pd.DataFrame,
+    group: str,
+) -> pd.DataFrame:
+    """Summarize turbine-level wake exposure into one row per group forecast."""
+    meta = _metadata_for_group(group)
+    parts = []
+    for _, turbine in meta.iterrows():
+        local = _local_weather(
+            ldaps,
+            gfs,
+            float(turbine["latitude"]),
+            float(turbine["longitude"]),
+        )
+        local = _add_wake_features(local, turbine, meta)
+        parts.append(
+            local[TIME_KEY_COLS + ["wake_exposure", "wake_upstream_count"]]
+        )
+
+    turbine_wake = pd.concat(parts, ignore_index=True)
+    grouped = turbine_wake.groupby(TIME_KEY_COLS, sort=True)
+    output = grouped[["wake_exposure", "wake_upstream_count"]].agg(
+        ["mean", "max", "std"]
+    )
+    output.columns = [f"{name}_{stat}" for name, stat in output.columns]
+    return output.reset_index().fillna(0.0)
 
 
 def get_or_build_group_feature_cache(

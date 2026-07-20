@@ -1,0 +1,21 @@
+{
+  "seed": 20260720,
+  "min_output_ratio": 0.10,
+  "tree_best_path": "configs/group_quota_lgbm_complete_nested_v1_best.csv",
+  "tcn": {
+    "window": 72,
+    "max_epochs": 100,
+    "patience": 15,
+    "batch_size": 256,
+    "eval_batch_size": 1024,
+    "hidden_size": 128,
+    "num_layers": 3,
+    "kernel_size": 3,
+    "dropout": 0.10,
+    "learning_rate": 0.0005,
+    "weight_decay": 0.0001,
+    "grad_clip": 1.0,
+    "min_delta": 0.00001
+  },
+  "tcn_shares": [0.90, 0.95]
+}

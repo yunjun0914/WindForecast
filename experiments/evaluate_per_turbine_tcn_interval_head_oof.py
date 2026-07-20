@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader, TensorDataset
+from sklearn.preprocessing import PowerTransformer
 
 import _bootstrap  # noqa: F401
 from models.seqnn import TCNPowerRegressor
@@ -129,6 +130,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--drop-wind-threshold", type=float, default=8.0)
     parser.add_argument("--drop-power-ratio-threshold", type=float, default=0.10)
     parser.add_argument("--target-share-alpha", type=float, default=1.0)
+    parser.add_argument(
+        "--feature-transform",
+        choices=["standard", "yeo_johnson"],
+        default="standard",
+    )
+    parser.add_argument(
+        "--target-transform",
+        choices=["identity", "sqrt"],
+        default="identity",
+    )
+    parser.add_argument("--fixed-epoch-source", type=Path)
+    parser.add_argument("--joint-base-share", type=float, default=0.25)
+    parser.add_argument("--compact-output", action="store_true")
     return parser.parse_args()
 
 
@@ -141,6 +155,106 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def load_fixed_epoch_map(path: Path | None) -> dict[tuple[str, str], int]:
+    if path is None:
+        return {}
+    table = pd.read_csv(path, encoding="utf-8-sig")
+    required = {"group", "turbine_id", "best_epoch"}
+    missing = sorted(required - set(table.columns))
+    if missing:
+        raise ValueError(f"Fixed epoch source missing columns: {missing}")
+    medians = table.groupby(["group", "turbine_id"])["best_epoch"].median()
+    return {key: max(1, int(round(value))) for key, value in medians.items()}
+
+
+def is_cyclic_feature(column: str) -> bool:
+    tokens = column.lower().split("_")
+    return "sin" in tokens or "cos" in tokens
+
+
+def apply_yeo_johnson(values: np.ndarray, power_lambda: float) -> np.ndarray:
+    values = np.asarray(values, dtype=np.float64)
+    output = np.empty_like(values)
+    nonnegative = values >= 0.0
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        if abs(power_lambda) < 1e-8:
+            output[nonnegative] = np.log1p(values[nonnegative])
+        else:
+            output[nonnegative] = (
+                np.power(values[nonnegative] + 1.0, power_lambda) - 1.0
+            ) / power_lambda
+        negative = ~nonnegative
+        if abs(power_lambda - 2.0) < 1e-8:
+            output[negative] = -np.log1p(-values[negative])
+        else:
+            output[negative] = -(
+                np.power(1.0 - values[negative], 2.0 - power_lambda) - 1.0
+            ) / (2.0 - power_lambda)
+    return np.nan_to_num(output, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+class FoldYeoJohnsonTransformer:
+    def __init__(self) -> None:
+        self.lambdas: dict[str, float] = {}
+        self.raw_bounds: dict[str, tuple[float, float]] = {}
+
+    def fit(self, table: pd.DataFrame, feature_cols: list[str]) -> "FoldYeoJohnsonTransformer":
+        for column in feature_cols:
+            if is_cyclic_feature(column):
+                continue
+            values = pd.to_numeric(table[column], errors="coerce").to_numpy(float)
+            values = values[np.isfinite(values)]
+            if len(values) < 20 or len(np.unique(values)) <= 20:
+                continue
+            if float(np.mean(np.isclose(values, 0.0))) >= 0.20:
+                continue
+            if len(values) > 50_000:
+                positions = np.linspace(0, len(values) - 1, 50_000, dtype=int)
+                values = values[positions]
+            lower, upper = np.quantile(values, [0.001, 0.999])
+            if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
+                continue
+            transformer = PowerTransformer(method="yeo-johnson", standardize=False)
+            try:
+                transformer.fit(values.reshape(-1, 1))
+            except (ValueError, FloatingPointError, OverflowError):
+                continue
+            power_lambda = float(transformer.lambdas_[0])
+            if np.isfinite(power_lambda):
+                candidate = apply_yeo_johnson(
+                    np.clip(values, lower, upper), power_lambda
+                )
+                if not np.isfinite(candidate).all() or np.max(np.abs(candidate)) > 1e12:
+                    continue
+                self.lambdas[column] = power_lambda
+                self.raw_bounds[column] = (float(lower), float(upper))
+        return self
+
+    def transform(self, table: pd.DataFrame) -> pd.DataFrame:
+        output = table.copy()
+        for column, power_lambda in self.lambdas.items():
+            values = pd.to_numeric(output[column], errors="coerce").to_numpy(float)
+            valid = np.isfinite(values)
+            transformed = values.copy()
+            lower, upper = self.raw_bounds[column]
+            clipped = np.clip(values[valid], lower, upper)
+            transformed[valid] = np.clip(
+                apply_yeo_johnson(clipped, power_lambda), -1e12, 1e12
+            )
+            output[column] = transformed
+        return output
+
+
+def decode_target_numpy(values: np.ndarray, transform: str) -> np.ndarray:
+    clipped = np.clip(values, 0.0, 1.0)
+    return clipped**2 if transform == "sqrt" else clipped
+
+
+def decode_target_tensor(values: torch.Tensor, transform: str) -> torch.Tensor:
+    clipped = torch.clamp(values, 0.0, 1.0)
+    return clipped.pow(2) if transform == "sqrt" else clipped
 
 
 def aligned_row_values(table: pd.DataFrame, column: str) -> np.ndarray:
@@ -226,6 +340,7 @@ def train_turbine_fold(
     args: argparse.Namespace,
     device: torch.device,
     seed: int,
+    fixed_epoch: int | None = None,
 ) -> tuple[np.ndarray, dict[str, object], dict[str, object]]:
     set_seed(seed)
     turbine_capacity = turbine_capacity_kwh(group)
@@ -274,6 +389,8 @@ def train_turbine_fold(
     gc.collect()
 
     y_train_norm = np.clip(y_train / turbine_capacity, 0, 1).astype(np.float32)
+    if args.target_transform == "sqrt":
+        y_train_norm = np.sqrt(y_train_norm).astype(np.float32)
     weights = (
         0.5 + np.sqrt(np.clip(official_train / group_capacity, 0, 1))
     ).astype(np.float32)
@@ -303,7 +420,8 @@ def train_turbine_fold(
     best_state = None
     bad_epochs = 0
     val_eval_indices = np.flatnonzero(val_eval_keep)
-    for epoch in range(1, args.epochs + 1):
+    max_epochs = fixed_epoch if fixed_epoch is not None else args.epochs
+    for epoch in range(1, max_epochs + 1):
         model.train()
         for xb, yb, wb in loader:
             xb = xb.to(device, non_blocking=True)
@@ -316,29 +434,35 @@ def train_turbine_fold(
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optimizer.step()
 
-        pred_eval_norm = predict_normalized(
-            model,
-            x_val_scaled[val_eval_indices],
-            device,
-            args.eval_batch_size,
-        )
-        pred_eval = np.clip(pred_eval_norm, 0, 1) * turbine_capacity
-        score, nmae, ficr = turbine_metric(
-            y_val_all[val_eval_keep],
-            pred_eval,
-            turbine_capacity,
-        )
-        if score > best_score + args.min_delta:
-            best_score = score
-            best_epoch = epoch
-            best_state = copy.deepcopy(model.state_dict())
-            bad_epochs = 0
-        else:
-            bad_epochs += 1
-        if bad_epochs >= args.patience:
-            break
+        if fixed_epoch is None:
+            pred_eval_norm = predict_normalized(
+                model,
+                x_val_scaled[val_eval_indices],
+                device,
+                args.eval_batch_size,
+            )
+            pred_eval = (
+                decode_target_numpy(pred_eval_norm, args.target_transform)
+                * turbine_capacity
+            )
+            score, nmae, ficr = turbine_metric(
+                y_val_all[val_eval_keep],
+                pred_eval,
+                turbine_capacity,
+            )
+            if score > best_score + args.min_delta:
+                best_score = score
+                best_epoch = epoch
+                best_state = copy.deepcopy(model.state_dict())
+                bad_epochs = 0
+            else:
+                bad_epochs += 1
+            if bad_epochs >= args.patience:
+                break
 
-    if best_state is not None:
+    if fixed_epoch is not None:
+        best_epoch = fixed_epoch
+    elif best_state is not None:
         model.load_state_dict(best_state)
     best_eval_norm = predict_normalized(
         model,
@@ -346,14 +470,16 @@ def train_turbine_fold(
         device,
         args.eval_batch_size,
     )
-    best_eval = np.clip(best_eval_norm, 0, 1) * turbine_capacity
+    best_eval = (
+        decode_target_numpy(best_eval_norm, args.target_transform) * turbine_capacity
+    )
     best_score, best_nmae, best_ficr = turbine_metric(
         y_val_all[val_eval_keep],
         best_eval,
         turbine_capacity,
     )
     pred_all_norm = predict_normalized(model, x_val_scaled, device, args.eval_batch_size)
-    pred_all = np.clip(pred_all_norm, 0, 1) * turbine_capacity
+    pred_all = decode_target_numpy(pred_all_norm, args.target_transform) * turbine_capacity
     train_pretrained_norm = predict_normalized(
         model, x_train_scaled, device, args.eval_batch_size
     ).astype(np.float32)
@@ -389,6 +515,9 @@ def train_turbine_fold(
         ),
         "n_val_all": len(y_val_all),
         "n_val_target": int(val_eval_keep.sum()),
+        "fixed_epoch": fixed_epoch if fixed_epoch is not None else np.nan,
+        "feature_transform": args.feature_transform,
+        "target_transform": args.target_transform,
     }
     del model, optimizer, loader, dataset, x_train_scaled, x_val_scaled
     gc.collect()
@@ -665,22 +794,21 @@ def fine_tune_group_backbones(
             target_batch = torch.from_numpy(target[batch_indices]).to(device)
             pretrained_batch = torch.from_numpy(pretrained[batch_indices]).to(device)
             optimizer.zero_grad(set_to_none=True)
-            turbine_prediction = torch.stack(
+            turbine_model_output = torch.stack(
                 [
-                    torch.clamp(
-                        model(torch.from_numpy(values[batch_indices]).to(device)),
-                        0.0,
-                        1.0,
-                    )
+                    model(torch.from_numpy(values[batch_indices]).to(device))
                     for model, values in zip(models, train_inputs)
                 ],
                 dim=1,
+            )
+            turbine_prediction = decode_target_tensor(
+                turbine_model_output, args.target_transform
             )
             group_prediction = turbine_prediction.sum(dim=1) * turbine_ratio
             score_loss, _, _ = soft_group_score_loss(
                 target_batch, group_prediction, args.joint_gamma
             )
-            anchor = (turbine_prediction - pretrained_batch).pow(2).mean()
+            anchor = (turbine_model_output - pretrained_batch).pow(2).mean()
             loss = score_loss + args.joint_anchor_weight * anchor
             loss.backward()
             torch.nn.utils.clip_grad_norm_(parameters, args.grad_clip)
@@ -710,7 +838,9 @@ def fine_tune_group_backbones(
             for turbine_index, (model, values) in enumerate(zip(models, val_inputs)):
                 batch = torch.from_numpy(values[start:stop]).to(device)
                 prediction_parts[turbine_index].append(
-                    torch.clamp(model(batch), 0.0, 1.0).cpu().numpy()
+                    decode_target_tensor(model(batch), args.target_transform)
+                    .cpu()
+                    .numpy()
                 )
 
     rows = []
@@ -739,14 +869,21 @@ def main() -> None:
         raise ValueError("--target-share-alpha must be in [0, 1]")
     if args.joint_finetune_epochs > 0 and not args.skip_interval_head:
         raise ValueError("Joint backbone fine-tune requires --skip-interval-head")
+    if args.target_transform != "identity" and not args.skip_interval_head:
+        raise ValueError("Target transforms require --skip-interval-head")
+    if not 0.0 <= args.joint_base_share <= 1.0:
+        raise ValueError("--joint-base-share must be in [0, 1]")
     if args.weather_source != "mixed":
         if args.feature_variant != "baseline":
             raise ValueError("Raw source experts require --feature-variant baseline")
     args.results_dir.mkdir(parents=True, exist_ok=True)
+    fixed_epochs = load_fixed_epoch_map(args.fixed_epoch_source)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(
         f"device={device} window={args.window} feature_variant={args.feature_variant} "
-        f"weather_source={args.weather_source} epochs={args.epochs} patience={args.patience}",
+        f"weather_source={args.weather_source} epochs={args.epochs} patience={args.patience} "
+        f"feature_transform={args.feature_transform} target_transform={args.target_transform} "
+        f"fixed_epochs={bool(fixed_epochs)}",
         flush=True,
     )
 
@@ -893,10 +1030,19 @@ def main() -> None:
                 feature_cols = list(TEACHER_FEATURE_COLS)
             else:
                 feature_cols = [*weather_cols, *TEACHER_FEATURE_COLS]
+            n_transformed_features = 0
+            if args.feature_transform == "yeo_johnson":
+                fit_rows = table["forecast_kst_dtm"].dt.year.isin(train_years)
+                feature_transformer = FoldYeoJohnsonTransformer().fit(
+                    table.loc[fit_rows], feature_cols
+                )
+                table = feature_transformer.transform(table)
+                n_transformed_features = len(feature_transformer.lambdas)
             print(
                 f"\n{group} pred_year={pred_year} train={train_years} "
                 f"variant={args.feature_variant} source={args.weather_source} "
-                f"features={len(feature_cols)} share_alpha={args.target_share_alpha:.2f}",
+                f"features={len(feature_cols)} transformed={n_transformed_features} "
+                f"share_alpha={args.target_share_alpha:.2f}",
                 flush=True,
             )
 
@@ -925,6 +1071,9 @@ def main() -> None:
                     feature_cols,
                     window=args.window,
                 )
+                fixed_epoch = fixed_epochs.get((group, turbine))
+                if fixed_epochs and fixed_epoch is None:
+                    raise ValueError(f"Missing fixed epoch for {group}/{turbine}")
                 pred, stats, artifact = train_turbine_fold(
                     x_train=x_train,
                     y_train=y_train,
@@ -940,6 +1089,7 @@ def main() -> None:
                     args=args,
                     device=device,
                     seed=args.seed + pred_year * 100 + turbine_index,
+                    fixed_epoch=fixed_epoch,
                 )
                 model_counter += 1
                 stats.update(
@@ -951,6 +1101,7 @@ def main() -> None:
                         "weather_source": args.weather_source,
                         "target_share_alpha": args.target_share_alpha,
                         "static_share": float(static_shares.loc[turbine]),
+                        "n_transformed_features": n_transformed_features,
                     }
                 )
                 training_rows.append(stats)
@@ -996,6 +1147,22 @@ def main() -> None:
                     "baseline_retrained": baseline_turbines,
                     "group_joint_score": joint_turbines,
                 }
+                mix_keys = ["forecast_kst_dtm", "group", "turbine_id"]
+                mixed_turbines = baseline_turbines.merge(
+                    joint_turbines[mix_keys + ["pred"]].rename(
+                        columns={"pred": "joint_pred"}
+                    ),
+                    on=mix_keys,
+                    how="inner",
+                    validate="one_to_one",
+                )
+                mixed_turbines["pred"] = (
+                    args.joint_base_share * mixed_turbines["pred"]
+                    + (1.0 - args.joint_base_share) * mixed_turbines["joint_pred"]
+                )
+                variants["base25_joint75"] = mixed_turbines.drop(
+                    columns="joint_pred"
+                )
             elif args.skip_interval_head:
                 turbine_prediction_parts.append(baseline_turbines)
                 variants = {"baseline_retrained": baseline_turbines}
@@ -1090,37 +1257,50 @@ def main() -> None:
     summary["n_models"] = model_counter
     summary["n_features"] = scores["n_features"].max()
     summary["window"] = args.window
-    pd.DataFrame(training_rows).to_csv(
-        args.results_dir / f"{args.stem}_training.csv", index=False, encoding="utf-8-sig"
-    )
-    pd.DataFrame(interval_training_rows).to_csv(
-        args.results_dir / f"{args.stem}_interval_training.csv",
-        index=False,
-        encoding="utf-8-sig",
-    )
-    pd.DataFrame(joint_training_rows).to_csv(
-        args.results_dir / f"{args.stem}_joint_training.csv",
-        index=False,
-        encoding="utf-8-sig",
-    )
-    scores.to_csv(args.results_dir / f"{args.stem}_scores.csv", index=False, encoding="utf-8-sig")
-    pooled_group_scores.to_csv(
-        args.results_dir / f"{args.stem}_pooled_group_scores.csv",
-        index=False,
-        encoding="utf-8-sig",
-    )
-    summary.to_csv(args.results_dir / f"{args.stem}_summary.csv", index=False, encoding="utf-8-sig")
     group_predictions.to_csv(
         args.results_dir / f"{args.stem}_predictions.csv", index=False, encoding="utf-8-sig"
     )
-    pd.concat(turbine_prediction_parts, ignore_index=True).to_csv(
-        args.results_dir / f"{args.stem}_turbine_predictions.csv", index=False, encoding="utf-8-sig"
-    )
-    pd.concat(baseline_turbine_prediction_parts, ignore_index=True).to_csv(
-        args.results_dir / f"{args.stem}_baseline_turbine_predictions.csv",
-        index=False,
-        encoding="utf-8-sig",
-    )
+    if not args.compact_output:
+        pd.DataFrame(training_rows).to_csv(
+            args.results_dir / f"{args.stem}_training.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
+        pd.DataFrame(interval_training_rows).to_csv(
+            args.results_dir / f"{args.stem}_interval_training.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
+        pd.DataFrame(joint_training_rows).to_csv(
+            args.results_dir / f"{args.stem}_joint_training.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
+        scores.to_csv(
+            args.results_dir / f"{args.stem}_scores.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
+        pooled_group_scores.to_csv(
+            args.results_dir / f"{args.stem}_pooled_group_scores.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
+        summary.to_csv(
+            args.results_dir / f"{args.stem}_summary.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
+        pd.concat(turbine_prediction_parts, ignore_index=True).to_csv(
+            args.results_dir / f"{args.stem}_turbine_predictions.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
+        pd.concat(baseline_turbine_prediction_parts, ignore_index=True).to_csv(
+            args.results_dir / f"{args.stem}_baseline_turbine_predictions.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
     print("\n=== summary ===", flush=True)
     print(summary.to_string(index=False), flush=True)
 
