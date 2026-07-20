@@ -790,6 +790,8 @@ def main() -> None:
     if missing_site:
         raise ValueError(f"Site features missing: {missing_site}")
     site_static = site_full[TIME_KEY_COLS + SITE_FEATURES].copy()
+    for column in TIME_KEY_COLS:
+        site_static[column] = pd.to_datetime(site_static[column])
     del site_full
     tables_by_group = {}
     for group in TARGET_COLS:
