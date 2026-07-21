@@ -115,6 +115,8 @@ def build_variant_folds(
             group,
             feature_profile=FEATURE_PROFILE_FULL_V2,
         )[[*TIME_KEY_COLS, "phys_gfs_air_density"]]
+        for column in TIME_KEY_COLS:
+            physics[column] = pd.to_datetime(physics[column])
         teacher_targets = build_group_scada_targets(scada_by_group[group], group)
         label_one = labels[["kst_dtm", group]].rename(
             columns={"kst_dtm": "forecast_kst_dtm", group: "target"}
