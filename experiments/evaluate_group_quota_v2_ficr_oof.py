@@ -22,7 +22,6 @@ from experiments.evaluate_group_decision_q_tcn_oof import (
     train_band_fold,
 )
 from experiments.evaluate_group_unified_oof import read_inputs
-from experiments.evaluate_per_turbine_bin_moe_tcn_oof import build_fold_features
 from utils.group_local_panel import build_group_local_panel
 from utils.group_quota_v2 import (
     GROUP_FAMILY_QUOTA64_V2_FEATURES,
@@ -32,12 +31,17 @@ from utils.group_quota_v2 import (
 from utils.issue_block_dataset import make_issue_blocks
 from utils.metrics import GROUP_CAPACITY_KWH, TARGET_COLS, pooled_oof_summary
 from utils.per_turbine_features import get_or_build_group_feature_cache
-from utils.per_turbine_optimal_grid_builder import build_wind_candidate_matrix
-from utils.per_turbine_scada import build_official_aligned_turbine_targets
+from utils.per_turbine_fixed_grid import (
+    FIXED_TURBINE_GRID_CONTRACT_NAME,
+    FIXED_TURBINE_GRID_FEATURES,
+    get_or_build_fixed_turbine_grid_features,
+)
+from utils.per_turbine_optimal_grid import WAKE_FEATURES
 from utils.preprocessing import TIME_KEY_COLS
 
 
-VARIANTS = ("quota_v1_control", "quota_v2_fixed_group")
+FIXED_LOCAL_PANEL_FEATURES = [*WAKE_FEATURES, *FIXED_TURBINE_GRID_FEATURES]
+VARIANTS = ("quota_v1_fixed_aux_control", "quota_v2_all_fixed")
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,11 +53,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--results-dir", type=Path, default=Path("results"))
     parser.add_argument(
-        "--stem", default="group_quota_v2_fixedgrid_ficr_oof_v1"
+        "--stem", default="group_quota_v2_allfixed_ficr_oof_v1"
     )
     parser.add_argument("--smoke-test", action="store_true")
     parser.add_argument("--rebuild-feature-cache", action="store_true")
-    parser.add_argument("--rebuild-optimal-grid-cache", action="store_true")
+    parser.add_argument("--rebuild-fixed-grid-cache", action="store_true")
     parser.add_argument("--rebuild-group-quota-cache", action="store_true")
     return parser.parse_args()
 
@@ -64,6 +68,11 @@ def load_config(path: Path, smoke_test: bool) -> tuple[dict, Namespace]:
         raise ValueError(
             "Config quota_grid_contract must be "
             f"{GROUP_QUOTA_V2_CONTRACT_NAME!r}"
+        )
+    if config.get("turbine_grid_contract") != FIXED_TURBINE_GRID_CONTRACT_NAME:
+        raise ValueError(
+            "Config turbine_grid_contract must be "
+            f"{FIXED_TURBINE_GRID_CONTRACT_NAME!r}"
         )
     training = dict(config["training"])
     if smoke_test:
@@ -80,7 +89,7 @@ def load_config(path: Path, smoke_test: bool) -> tuple[dict, Namespace]:
     train_args.feature_variant = config["feature_variant"]
     train_args.cache_root = Path(config["cache_root"])
     train_args.rebuild_feature_cache = False
-    train_args.rebuild_optimal_grid_cache = False
+    train_args.rebuild_fixed_grid_cache = False
     return config, train_args
 
 
@@ -127,25 +136,40 @@ def build_fold_arrays_for_variant(
     gfs: pd.DataFrame,
     labels: pd.DataFrame,
     base_features: pd.DataFrame,
-    wind_candidates,
-    turbine_targets: pd.DataFrame,
     train_args: Namespace,
     rebuild_group_quota_cache: bool,
 ):
-    train_years = [year for year in years if year != pred_year]
-    features, _, optimal_selections = build_fold_features(
-        base_features,
-        wind_candidates,
-        turbine_targets,
+    del years
+    fixed_aux, aux_contract = get_or_build_fixed_turbine_grid_features(
+        ldaps,
         group,
-        pred_year,
-        train_years,
-        train_args,
+        cache_root=train_args.cache_root,
+        rebuild=train_args.rebuild_fixed_grid_cache,
     )
+    keys = [*TIME_KEY_COLS, "turbine_id"]
+    before = len(base_features)
+    features = base_features.merge(
+        fixed_aux[keys + FIXED_TURBINE_GRID_FEATURES],
+        on=keys,
+        how="left",
+        validate="one_to_one",
+    )
+    if len(features) != before:
+        raise ValueError(
+            f"Fixed turbine-grid merge changed rows: {before} -> {len(features)}"
+        )
+    coverage = float(features[FIXED_TURBINE_GRID_FEATURES].notna().mean().min())
+    if coverage < 0.95:
+        raise ValueError(f"Low fixed turbine-grid coverage for {group}: {coverage}")
+
     quota_selections = pd.DataFrame()
-    if variant == "quota_v1_control":
-        panel = build_group_local_panel(features, group)
-    elif variant == "quota_v2_fixed_group":
+    if variant == "quota_v1_fixed_aux_control":
+        panel = build_group_local_panel(
+            features,
+            group,
+            local_feature_cols=FIXED_LOCAL_PANEL_FEATURES,
+        )
+    elif variant == "quota_v2_all_fixed":
         group_quota, quota_selections = get_or_build_group_quota_v2(
             ldaps,
             gfs,
@@ -172,6 +196,7 @@ def build_fold_arrays_for_variant(
             features,
             group,
             common_feature_cols=v2_cols,
+            local_feature_cols=FIXED_LOCAL_PANEL_FEATURES,
         )
     else:
         raise ValueError(f"Unknown quota variant: {variant}")
@@ -189,7 +214,7 @@ def build_fold_arrays_for_variant(
         float(GROUP_CAPACITY_KWH[group]),
         float(train_args.target_min_output_ratio),
     )
-    return arrays, feature_cols, optimal_selections, quota_selections
+    return arrays, feature_cols, aux_contract, quota_selections
 
 
 def run_discovery(
@@ -202,8 +227,6 @@ def run_discovery(
     ldaps: pd.DataFrame,
     gfs: pd.DataFrame,
     labels: pd.DataFrame,
-    scada_by_group: dict[str, pd.DataFrame],
-    wind_candidates,
     device: torch.device,
     rebuild_group_quota_cache: bool,
 ) -> tuple[pd.DataFrame, dict[str, list[int]], list[dict], list[pd.DataFrame]]:
@@ -219,11 +242,8 @@ def run_discovery(
             cache_root=train_args.cache_root,
             rebuild=train_args.rebuild_feature_cache,
         )
-        targets = build_official_aligned_turbine_targets(
-            scada_by_group[group], labels, group
-        )
         for pred_year in valid_years(labels, group, years):
-            arrays, feature_cols, optimal_sel, quota_sel = (
+            arrays, feature_cols, aux_contract, quota_sel = (
                 build_fold_arrays_for_variant(
                     variant=variant,
                     group=group,
@@ -233,8 +253,6 @@ def run_discovery(
                     gfs=gfs,
                     labels=labels,
                     base_features=base_features,
-                    wind_candidates=wind_candidates,
-                    turbine_targets=targets,
                     train_args=train_args,
                     rebuild_group_quota_cache=rebuild_group_quota_cache,
                 )
@@ -267,10 +285,10 @@ def run_discovery(
                         **row,
                     }
                 )
-            optimal_sel = optimal_sel.copy()
-            optimal_sel["pred_year"] = pred_year
-            optimal_sel["selection_kind"] = "panel_optimal_grid"
-            selection_parts.append(optimal_sel)
+            aux_contract = aux_contract.copy()
+            aux_contract["pred_year"] = pred_year
+            aux_contract["selection_kind"] = "panel_fixed_turbine_grid"
+            selection_parts.append(aux_contract)
             if not quota_sel.empty:
                 quota_sel = quota_sel.copy()
                 quota_sel["pred_year"] = pred_year
@@ -278,7 +296,7 @@ def run_discovery(
                 selection_parts.append(quota_sel)
             del arrays
             gc.collect()
-        del base_features, targets
+        del base_features
         gc.collect()
     return (
         pd.concat(prediction_parts, ignore_index=True),
@@ -299,8 +317,6 @@ def run_fixed(
     ldaps: pd.DataFrame,
     gfs: pd.DataFrame,
     labels: pd.DataFrame,
-    scada_by_group: dict[str, pd.DataFrame],
-    wind_candidates,
     device: torch.device,
 ) -> tuple[pd.DataFrame, list[dict], list[dict]]:
     prediction_parts = []
@@ -314,9 +330,6 @@ def run_fixed(
             cache_root=train_args.cache_root,
             rebuild=False,
         )
-        targets = build_official_aligned_turbine_targets(
-            scada_by_group[group], labels, group
-        )
         for pred_year in valid_years(labels, group, years):
             arrays, feature_cols, _, _ = build_fold_arrays_for_variant(
                 variant=variant,
@@ -327,8 +340,6 @@ def run_fixed(
                 gfs=gfs,
                 labels=labels,
                 base_features=base_features,
-                wind_candidates=wind_candidates,
-                turbine_targets=targets,
                 train_args=train_args,
                 rebuild_group_quota_cache=False,
             )
@@ -384,25 +395,13 @@ def run_fixed(
                 )
             del arrays
             gc.collect()
-        del base_features, targets
+        del base_features
         gc.collect()
     return (
         pd.concat(prediction_parts, ignore_index=True),
         fold_rows,
         history_rows,
     )
-
-
-def reference_score(config: dict) -> float:
-    path = Path(config["reference_oof_path"])
-    reference = pd.read_csv(path)
-    reference = reference.loc[
-        reference["variant"].eq(config["reference_variant"])
-    ].copy()
-    if reference.empty:
-        raise ValueError(f"Reference variant missing from {path}")
-    summary, _ = pooled_oof_summary(reference)
-    return float(summary.iloc[0]["mean_score"])
 
 
 def partial_oof_summary(
@@ -442,7 +441,7 @@ def main() -> None:
     args = parse_args()
     config, train_args = load_config(args.config, args.smoke_test)
     train_args.rebuild_feature_cache = args.rebuild_feature_cache
-    train_args.rebuild_optimal_grid_cache = args.rebuild_optimal_grid_cache
+    train_args.rebuild_fixed_grid_cache = args.rebuild_fixed_grid_cache
     groups = list(config["groups"])
     years = [int(year) for year in config["years"]]
     if groups != [group for group in TARGET_COLS if group in groups]:
@@ -457,15 +456,14 @@ def main() -> None:
         f"smoke={args.smoke_test}",
         flush=True,
     )
-    ldaps, gfs, labels, scada_by_group = read_inputs()
-    wind_candidates = build_wind_candidate_matrix(ldaps, gfs)
+    ldaps, gfs, labels, _ = read_inputs()
 
     discovery_predictions = []
     discoveries = {}
     all_history = []
     all_selections = []
     control_pred, control_epochs, history, selections = run_discovery(
-        variant="quota_v1_control",
+        variant="quota_v1_fixed_aux_control",
         config=config,
         train_args=train_args,
         groups=groups,
@@ -473,34 +471,16 @@ def main() -> None:
         ldaps=ldaps,
         gfs=gfs,
         labels=labels,
-        scada_by_group=scada_by_group,
-        wind_candidates=wind_candidates,
         device=device,
         rebuild_group_quota_cache=False,
     )
     discovery_predictions.append(control_pred)
-    discoveries["quota_v1_control"] = control_epochs
+    discoveries["quota_v1_fixed_aux_control"] = control_epochs
     all_history.extend(history)
     all_selections.extend(selections)
 
-    if not args.smoke_test:
-        control_summary, _ = pooled_oof_summary(control_pred)
-        reproduced = float(control_summary.iloc[0]["mean_score"])
-        expected = reference_score(config)
-        difference = abs(reproduced - expected)
-        print(
-            f"\ncontrol reproduction expected={expected:.6f} "
-            f"actual={reproduced:.6f} diff={difference:.6f}",
-            flush=True,
-        )
-        if difference > float(config["reference_tolerance"]):
-            raise RuntimeError(
-                f"Control reproduction gate failed: {difference:.6f} > "
-                f"{float(config['reference_tolerance']):.6f}"
-            )
-
     v2_pred, v2_epochs, history, selections = run_discovery(
-        variant="quota_v2_fixed_group",
+        variant="quota_v2_all_fixed",
         config=config,
         train_args=train_args,
         groups=groups,
@@ -508,13 +488,11 @@ def main() -> None:
         ldaps=ldaps,
         gfs=gfs,
         labels=labels,
-        scada_by_group=scada_by_group,
-        wind_candidates=wind_candidates,
         device=device,
         rebuild_group_quota_cache=args.rebuild_group_quota_cache,
     )
     discovery_predictions.append(v2_pred)
-    discoveries["quota_v2_fixed_group"] = v2_epochs
+    discoveries["quota_v2_all_fixed"] = v2_epochs
     all_history.extend(history)
     all_selections.extend(selections)
 
@@ -541,8 +519,6 @@ def main() -> None:
             ldaps=ldaps,
             gfs=gfs,
             labels=labels,
-            scada_by_group=scada_by_group,
-            wind_candidates=wind_candidates,
             device=device,
         )
         fixed_predictions.append(predictions)

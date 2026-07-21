@@ -3,11 +3,9 @@
   "groups": ["kpx_group_1", "kpx_group_2", "kpx_group_3"],
   "years": [2022, 2023, 2024],
   "cache_root": "cache",
-  "reference_oof_path": "results/group_pure_band_tcn_oof_v1_predictions.csv",
-  "reference_variant": "pure_band",
-  "reference_tolerance": 0.003,
   "quota_grid_contract": "fixed_eda_group_mapping_v1",
-  "feature_variant": "optimal_grid_replace_local16",
+  "turbine_grid_contract": "wind_eda_fixed_ldaps_v1",
+  "feature_variant": "fixed_turbine_grid",
   "training": {
     "epochs": 80,
     "patience": 10,
