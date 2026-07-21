@@ -1,0 +1,8 @@
+{
+  "years": [2022, 2023, 2024],
+  "cache_root": "cache",
+  "best_params_path": "configs/group_quota_lgbm_complete_nested_v1_best.csv",
+  "quota_grid_contract": "fixed_eda_group_mapping_v1",
+  "turbine_grid_contract": "wind_eda_fixed_ldaps_v1",
+  "smoke_estimators": 40
+}

@@ -1,0 +1,13 @@
+{
+  "seed": 20260721,
+  "years": [2022, 2023, 2024],
+  "cache_root": "cache",
+  "base_config_path": "configs/group_unified_v1.json",
+  "teacher_trees": 128,
+  "max_epochs": 80,
+  "patience": 15,
+  "min_delta": 0.00001,
+  "loss_mode": "pure_band_ficr",
+  "quota_grid_contract": "fixed_eda_group_mapping_v1",
+  "turbine_grid_contract": "wind_eda_fixed_ldaps_v1"
+}
