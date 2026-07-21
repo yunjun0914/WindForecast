@@ -401,6 +401,39 @@ def reference_score(config: dict) -> float:
     return float(summary.iloc[0]["mean_score"])
 
 
+def partial_oof_summary(
+    predictions: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Summarize smoke runs that intentionally contain only a subset of groups."""
+    group_rows = []
+    for (variant, group), part in predictions.groupby(["variant", "group"]):
+        score, nmae, ficr = group_score(
+            part["official_target"], part["pred"], group
+        )
+        group_rows.append(
+            {
+                "variant": variant,
+                "group": group,
+                "score": score,
+                "nmae": nmae,
+                "ficr": ficr,
+                "n_rows": len(part),
+            }
+        )
+    group_scores = pd.DataFrame(group_rows)
+    summary = (
+        group_scores.groupby("variant", as_index=False)
+        .agg(
+            mean_score=("score", "mean"),
+            mean_nmae=("nmae", "mean"),
+            mean_ficr=("ficr", "mean"),
+            n_groups=("group", "nunique"),
+        )
+        .sort_values("mean_score", ascending=False)
+    )
+    return summary, group_scores
+
+
 def main() -> None:
     args = parse_args()
     config, train_args = load_config(args.config, args.smoke_test)
@@ -515,8 +548,12 @@ def main() -> None:
 
     discovery = pd.concat(discovery_predictions, ignore_index=True)
     fixed = pd.concat(fixed_predictions, ignore_index=True)
-    discovery_summary, discovery_group_scores = pooled_oof_summary(discovery)
-    fixed_summary, fixed_group_scores = pooled_oof_summary(fixed)
+    if args.smoke_test:
+        discovery_summary, discovery_group_scores = partial_oof_summary(discovery)
+        fixed_summary, fixed_group_scores = partial_oof_summary(fixed)
+    else:
+        discovery_summary, discovery_group_scores = pooled_oof_summary(discovery)
+        fixed_summary, fixed_group_scores = pooled_oof_summary(fixed)
     prefix = args.results_dir / args.stem
     discovery.to_csv(
         f"{prefix}_discovery_predictions.csv", index=False, encoding="utf-8-sig"
