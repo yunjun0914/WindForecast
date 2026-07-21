@@ -8,10 +8,10 @@ import pandas as pd
 
 from utils.group_quota_v2 import (
     GROUP_FAMILY_QUOTA64_V2_FEATURES,
-    build_selected_source_panel,
-    select_group_source_grids,
+    GROUP_QUOTA_V2_FIXED_GRID_COUNTS,
+    build_fixed_source_panel,
+    fixed_group_grid_contract,
 )
-from utils.per_turbine_optimal_grid_builder import WindCandidateMatrix
 from utils.power_curve import GROUP_TURBINE_PREFIXES
 from utils.tree_feature_profiles import GROUP_FAMILY_QUOTA65_V1_FEATURES
 
@@ -19,79 +19,53 @@ from utils.tree_feature_profiles import GROUP_FAMILY_QUOTA65_V1_FEATURES
 class GroupQuotaV2Test(unittest.TestCase):
     def test_feature_contract_keeps_64_per_group_and_76_union(self):
         self.assertEqual(
-            {group: len(names) for group, names in GROUP_FAMILY_QUOTA64_V2_FEATURES.items()},
+            {
+                group: len(names)
+                for group, names in GROUP_FAMILY_QUOTA64_V2_FEATURES.items()
+            },
             {group: 64 for group in GROUP_FAMILY_QUOTA65_V1_FEATURES},
         )
         union = set().union(*map(set, GROUP_FAMILY_QUOTA64_V2_FEATURES.values()))
         self.assertEqual(len(union), 76)
         self.assertTrue(all(name.startswith("gqv2__") for name in union))
 
-    def test_source_selection_uses_only_requested_train_year(self):
-        n_per_year = 120
-        forecast = pd.date_range("2022-01-01", periods=n_per_year, freq="h").append(
-            pd.date_range("2023-01-01", periods=n_per_year, freq="h")
-        )
-        keys = pd.DataFrame(
-            {
-                "forecast_kst_dtm": forecast,
-                "data_available_kst_dtm": forecast - pd.Timedelta(hours=12),
-            }
-        )
-        target = np.concatenate(
-            [np.full(n_per_year, 5.0), np.full(n_per_year, 9.0)]
-        ).astype(np.float32)
-        ws = np.column_stack(
-            [
-                np.full(len(forecast), 5.0),
-                np.full(len(forecast), 9.0),
-                np.full(len(forecast), 20.0),
-            ]
-        ).astype(np.float32)
-        candidates = WindCandidateMatrix(
-            keys=keys,
-            names=("ldaps|1|ws10", "ldaps|2|ws10", "gfs|5|ws100"),
-            u=ws.copy(),
-            v=np.zeros_like(ws),
-            ws=ws,
-        )
-        target_parts = []
-        for turbine in GROUP_TURBINE_PREFIXES["kpx_group_1"]:
-            target_parts.append(
-                pd.DataFrame(
-                    {
-                        "forecast_kst_dtm": forecast,
-                        "turbine_id": turbine,
-                        "scada_ws_mean": target,
-                    }
+    def test_fixed_grid_contract_matches_group_mapping(self):
+        expected = {
+            "ldaps": {
+                "kpx_group_1": {2: 3, 12: 3},
+                "kpx_group_2": {2: 2, 3: 1, 7: 2, 12: 1},
+                "kpx_group_3": {3: 1, 12: 1, 13: 3},
+            },
+            "gfs": {
+                "kpx_group_1": {2: 2, 4: 3, 7: 1},
+                "kpx_group_2": {2: 1, 4: 5},
+                "kpx_group_3": {2: 4, 4: 1},
+            },
+        }
+        self.assertEqual(GROUP_QUOTA_V2_FIXED_GRID_COUNTS, expected)
+        for source, groups in expected.items():
+            for group, counts in groups.items():
+                contract = fixed_group_grid_contract(group, source)
+                self.assertEqual(
+                    dict(zip(contract["grid_id"], contract["group_weight_count"])),
+                    counts,
                 )
-            )
-        targets = pd.concat(target_parts, ignore_index=True)
-
-        selected_2022 = select_group_source_grids(
-            candidates,
-            targets,
-            "kpx_group_1",
-            [2022],
-            "ldaps",
-        )
-        selected_2023 = select_group_source_grids(
-            candidates,
-            targets,
-            "kpx_group_1",
-            [2023],
-            "ldaps",
-        )
-        self.assertEqual(set(selected_2022["grid_id"]), {1})
-        self.assertEqual(set(selected_2023["grid_id"]), {2})
+                self.assertEqual(
+                    int(contract["group_weight_count"].sum()),
+                    len(GROUP_TURBINE_PREFIXES[group]),
+                )
+                self.assertAlmostEqual(float(contract["group_weight"].sum()), 1.0)
+                self.assertNotIn("train_years", contract.columns)
+                self.assertNotIn("turbine_id", contract.columns)
 
     @patch("utils.group_quota_v2.group_site_summary")
-    def test_selected_panel_anchor_is_turbine_weighted(self, site_summary):
+    def test_fixed_panel_anchor_uses_immutable_group_weights(self, site_summary):
         site_summary.return_value = {
             "kpx_group_1": {"latitude": 37.28, "longitude": 128.96}
         }
         times = pd.date_range("2022-01-01", periods=2, freq="h")
         rows = []
-        for grid_id, value in [(1, 1.0), (2, 3.0)]:
+        for grid_id, value in [(2, 1.0), (12, 3.0)]:
             for time in times:
                 rows.append(
                     {
@@ -104,22 +78,35 @@ class GroupQuotaV2Test(unittest.TestCase):
                     }
                 )
         raw = pd.DataFrame(rows)
-        turbines = GROUP_TURBINE_PREFIXES["kpx_group_1"]
-        selections = pd.DataFrame(
-            {
-                "group": "kpx_group_1",
-                "turbine_id": turbines,
-                "source": "ldaps",
-                "grid_id": [1, 2, 2, 2, 2, 2],
-            }
-        )
-        panel = build_selected_source_panel(
-            raw, selections, "kpx_group_1", "ldaps"
+        contract = fixed_group_grid_contract("kpx_group_1", "ldaps")
+        panel = build_fixed_source_panel(
+            raw, contract, "kpx_group_1", "ldaps"
         )
         anchor = panel.loc[panel["grid_id"].eq("group_anchor")]
         self.assertEqual(len(anchor), 2)
-        self.assertTrue(np.allclose(anchor["wind"], (1.0 + 5 * 3.0) / 6.0))
-        self.assertEqual(len(panel), 2 * (len(turbines) + 1))
+        self.assertTrue(np.allclose(anchor["wind"], (3 * 1.0 + 3 * 3.0) / 6.0))
+        self.assertEqual(
+            len(panel), 2 * (len(GROUP_TURBINE_PREFIXES["kpx_group_1"]) + 1)
+        )
+
+    def test_panel_rejects_modified_contract(self):
+        contract = fixed_group_grid_contract("kpx_group_1", "ldaps")
+        contract.loc[contract["grid_id"].eq(2), "group_weight_count"] = 2
+        with self.assertRaisesRegex(ValueError, "Modified fixed grid contract"):
+            build_fixed_source_panel(
+                pd.DataFrame(
+                    {
+                        "forecast_kst_dtm": [],
+                        "data_available_kst_dtm": [],
+                        "grid_id": [],
+                        "latitude": [],
+                        "longitude": [],
+                    }
+                ),
+                contract,
+                "kpx_group_1",
+                "ldaps",
+            )
 
 
 if __name__ == "__main__":

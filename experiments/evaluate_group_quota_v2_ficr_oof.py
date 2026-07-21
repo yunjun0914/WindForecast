@@ -26,6 +26,7 @@ from experiments.evaluate_per_turbine_bin_moe_tcn_oof import build_fold_features
 from utils.group_local_panel import build_group_local_panel
 from utils.group_quota_v2 import (
     GROUP_FAMILY_QUOTA64_V2_FEATURES,
+    GROUP_QUOTA_V2_CONTRACT_NAME,
     get_or_build_group_quota_v2,
 )
 from utils.issue_block_dataset import make_issue_blocks
@@ -36,7 +37,7 @@ from utils.per_turbine_scada import build_official_aligned_turbine_targets
 from utils.preprocessing import TIME_KEY_COLS
 
 
-VARIANTS = ("quota_v1_control", "quota_v2_group_local")
+VARIANTS = ("quota_v1_control", "quota_v2_fixed_group")
 
 
 def parse_args() -> argparse.Namespace:
@@ -47,7 +48,9 @@ def parse_args() -> argparse.Namespace:
         default=Path("configs/group_quota_v2_ficr_oof_v1.json"),
     )
     parser.add_argument("--results-dir", type=Path, default=Path("results"))
-    parser.add_argument("--stem", default="group_quota_v2_ficr_fixed_oof_v1")
+    parser.add_argument(
+        "--stem", default="group_quota_v2_fixedgrid_ficr_oof_v1"
+    )
     parser.add_argument("--smoke-test", action="store_true")
     parser.add_argument("--rebuild-feature-cache", action="store_true")
     parser.add_argument("--rebuild-optimal-grid-cache", action="store_true")
@@ -57,6 +60,11 @@ def parse_args() -> argparse.Namespace:
 
 def load_config(path: Path, smoke_test: bool) -> tuple[dict, Namespace]:
     config = json.loads(path.read_text(encoding="utf-8"))
+    if config.get("quota_grid_contract") != GROUP_QUOTA_V2_CONTRACT_NAME:
+        raise ValueError(
+            "Config quota_grid_contract must be "
+            f"{GROUP_QUOTA_V2_CONTRACT_NAME!r}"
+        )
     training = dict(config["training"])
     if smoke_test:
         training.update(
@@ -137,15 +145,11 @@ def build_fold_arrays_for_variant(
     quota_selections = pd.DataFrame()
     if variant == "quota_v1_control":
         panel = build_group_local_panel(features, group)
-    elif variant == "quota_v2_group_local":
+    elif variant == "quota_v2_fixed_group":
         group_quota, quota_selections = get_or_build_group_quota_v2(
             ldaps,
             gfs,
-            wind_candidates,
-            turbine_targets,
             group,
-            pred_year,
-            train_years,
             cache_root=train_args.cache_root,
             rebuild=rebuild_group_quota_cache,
         )
@@ -270,7 +274,7 @@ def run_discovery(
             if not quota_sel.empty:
                 quota_sel = quota_sel.copy()
                 quota_sel["pred_year"] = pred_year
-                quota_sel["selection_kind"] = "quota_v2_source_grid"
+                quota_sel["selection_kind"] = "quota_v2_fixed_grid_contract"
                 selection_parts.append(quota_sel)
             del arrays
             gc.collect()
@@ -496,7 +500,7 @@ def main() -> None:
             )
 
     v2_pred, v2_epochs, history, selections = run_discovery(
-        variant="quota_v2_group_local",
+        variant="quota_v2_fixed_group",
         config=config,
         train_args=train_args,
         groups=groups,
@@ -510,7 +514,7 @@ def main() -> None:
         rebuild_group_quota_cache=args.rebuild_group_quota_cache,
     )
     discovery_predictions.append(v2_pred)
-    discoveries["quota_v2_group_local"] = v2_epochs
+    discoveries["quota_v2_fixed_group"] = v2_epochs
     all_history.extend(history)
     all_selections.extend(selections)
 
