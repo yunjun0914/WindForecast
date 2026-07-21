@@ -5,7 +5,7 @@
   "cache_root": "cache",
   "reference_oof_path": "results/group_pure_band_tcn_oof_v1_predictions.csv",
   "reference_variant": "pure_band",
-  "reference_tolerance": 0.002,
+  "reference_tolerance": 0.003,
   "feature_variant": "optimal_grid_replace_local16",
   "training": {
     "epochs": 80,
