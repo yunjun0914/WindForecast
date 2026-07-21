@@ -1,16 +1,5 @@
 {
   "seed": 20260721,
   "base_config_path": "configs/group_base_recovery_v1.json",
-  "base_epoch": 4,
-  "finetune": {
-    "max_epochs": 30,
-    "patience": 8,
-    "learning_rate": 0.0001,
-    "weight_decay": 0.0001,
-    "gamma": 0.00682273,
-    "anchor_weight": 0.03,
-    "grad_clip": 1.0,
-    "min_delta": 0.00001
-  },
-  "base_share": 0.25
+  "gamma": 0.00682273
 }

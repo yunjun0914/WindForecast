@@ -53,7 +53,7 @@ def test_soft_band_objectives_reward_inside_band_prediction():
     observed = torch.ones_like(target)
     inside = target + 0.05
     outside = target + 0.10
-    for mode in ("pure_band_ficr", "ficr_mae"):
+    for mode in ("pure_band_ficr", "ficr_nmae"):
         inside_loss, _, inside_ficr = soft_band_objective(
             inside, target, observed, mode, gamma=0.00682273
         )

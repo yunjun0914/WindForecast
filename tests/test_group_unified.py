@@ -1,12 +1,18 @@
 import numpy as np
 import torch
 
+from experiments.evaluate_group_pinn_band_loss_oof import data_loss_weights
 from models.group_unified import (
     BoundedResidualMLP,
     GroupPhysicsPINN,
     MultiHeadTCNPowerRegressor,
     normalized_metric_loss,
 )
+
+
+def test_group_pinn_band_loss_weights_are_direct():
+    assert data_loss_weights("pure_band_ficr") == (0.0, 1.0)
+    assert data_loss_weights("ficr_nmae") == (0.5, 0.5)
 
 
 def test_normalized_metric_loss_rewards_closer_prediction():

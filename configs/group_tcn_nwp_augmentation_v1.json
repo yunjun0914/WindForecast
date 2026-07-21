@@ -1,0 +1,14 @@
+{
+  "seed": 20260721,
+  "base_config_path": "configs/group_base_recovery_v1.json",
+  "baseline_oof_path": "results/group_tcn_direct_band_loss_v1_oof.csv",
+  "fixed_epoch": 9,
+  "loss_mode": "ficr_nmae",
+  "gamma": 0.00682273,
+  "augmentation": {
+    "speed_scale_std": 0.02,
+    "direction_std_deg": 3.0,
+    "max_speed_scale_delta": 0.06,
+    "max_direction_deg": 9.0
+  }
+}

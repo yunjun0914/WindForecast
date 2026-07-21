@@ -1,0 +1,7 @@
+{
+  "seed": 20260721,
+  "base_config_path": "configs/group_unified_v1.json",
+  "max_epochs": 80,
+  "patience": 15,
+  "min_delta": 0.00001
+}
