@@ -445,7 +445,6 @@ def main() -> None:
         raise ValueError("Groups must follow TARGET_COLS order")
     if args.smoke_test:
         groups = groups[:1]
-        years = years[:2]
 
     args.results_dir.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

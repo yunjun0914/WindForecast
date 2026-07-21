@@ -229,7 +229,15 @@ def get_or_build_group_quota_v2(
     feature_path = cache_dir / f"{group}_pred{pred_year}_features.pkl"
     selection_path = cache_dir / f"{group}_pred{pred_year}_selections.csv"
     if feature_path.exists() and selection_path.exists() and not rebuild:
-        return pd.read_pickle(feature_path), pd.read_csv(selection_path)
+        cached_selections = pd.read_csv(selection_path)
+        expected_train_years = ",".join(map(str, train_years))
+        cached_train_years = set(
+            cached_selections.get("train_years", pd.Series(dtype=str))
+            .astype(str)
+            .unique()
+        )
+        if cached_train_years == {expected_train_years}:
+            return pd.read_pickle(feature_path), cached_selections
 
     features, selections = build_group_quota_v2(
         ldaps,
